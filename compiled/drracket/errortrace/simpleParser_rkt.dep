@@ -1,0 +1,1 @@
+("8.7" tarm64osx ("e0e83ce077a7725b80d5d28c796e973faa4fa1dd" . "5fd27ea70bbc1796d00ce8957f5118ad1b95702f") #"/Users/urdeer/Desktop/plc/Language_Interpreter_Project/lex.rkt" (collects #"drracket" #"private" #"drracket-errortrace-key.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))
