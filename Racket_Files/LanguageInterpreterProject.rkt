@@ -31,7 +31,7 @@
       ((eq? (statementType tree) 'if) (return (Mstate_cond (cdr tree) state)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (print "While Statement Found")))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state)))
 
       ; entering return statement
       ((eq? (statementType tree) 'return) (return (Mstate_return tree state)))
@@ -100,10 +100,20 @@
 ; if-statements
 (define Mstate_cond
   (lambda (expression state)
-    (if (compute (car expression) state (lambda (val SylvieIsA...) val))
-        (evaluateState (cadr expression)  state (lambda(v) v))
-        (evaluateState (caddr expression) state (lambda(v) v)))))
-     
+    (compute (car expression) state (lambda (val newState)
+                                      (if val
+                                          (evaluateState (cadr expression) newState (lambda (v) v))
+                                          (if (null? (cddr expression))
+                                              newState
+                                              (evaluateState (caddr expression)newState (lambda (v) v))))))))
+
+; while-statements
+(define Mstate_while
+  (lambda (expression state)
+    (compute (car expression) state (lambda (val newState)
+                                      (if val
+                                          (Mstate_while expression (evaluateState (cadr expression) newState (lambda (v) v)))
+                                           (compute (car expression) newState (lambda (val news) news)))))))
 
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
@@ -169,7 +179,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (return (remainder leftVal rightVal) rightState))))))
+                           (return (remainder leftVal rightVal) rightState)))))) ; issue here?
       ; less than
       ((eq? (statementType expression) '<)
        (Mvalue (leftOperand expression)
@@ -282,7 +292,8 @@
   (lambda (valLis index currIndex return)
     (if (eq? index currIndex)
         (if (eq? (car valLis) 'NULL)
-            (error "variable has not been assigned")
+            (begin (print valLis)
+            (error "variable has not been assigned"))
             (return (car valLis)))
         (findBinding (cdr valLis) index (+ currIndex 1) (lambda (v) v)))))
 
