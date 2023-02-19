@@ -14,10 +14,12 @@
       ((null? tree) state)
       ((atom? tree) state)
 
-      ; entering sub-tree 
+      ; if there is a nested statement
       ((list? (statementType tree)) (evaluateState (car tree)
                                     state
                                     (lambda (v) (return (evaluateState (cdr tree) v return)))))
+      
+      ; otherwise is some kind of statement- 
       
       ; declaring variable
       ((eq? (statementType tree) 'var) (return (Mstate_var tree state)))
@@ -33,14 +35,10 @@
       
   )))
 
-
-
 ; returns the statement type 
 (define statementType
   (lambda (expression)
     (car expression)))
-
-
 
 ; evaluating the value of an expression
 (define Mvalue
@@ -71,41 +69,6 @@
       (else (return (compute expression state (lambda (v) (print "?") (return v state))) state)))))
 
 
-; calulate
-(define compute
-  (lambda (expression state return)
-   ; (print expression)
-    (cond
-      ((eq? (statementType expression) '+)
-       ;(+ (Mvalue (leftOperand expression) state (lambda (leftVal leftState) leftVal))
-       ; (Mvalue (rightOperand expression) state (lambda (leftVal leftState) leftVal)))
-       (Mvalue (leftOperand expression) state (lambda (leftVal leftState)
-                                                (Mvalue (rightOperand expression)
-                                                        leftState
-                                                        (lambda (rightVal rightState)
-                                                          (+ leftVal rightVal))))))
-                                           
-                                          
-                                           )))
-
-                                          
-
-; right operand
-(define rightOperand
-  (lambda (expression)
-    (caddr expression)))
-
-; left operand
-(define leftOperand
-  (lambda (expression)
-    (cadr expression)))
-
-
-; if the value is an atom
-(define (atom? x)
-  (and (not (null? x))
-       (not (pair? x))))
-
 ; variable declaration 
 (define Mstate_var
   (lambda (expression state)
@@ -116,31 +79,72 @@
         ;(cons (cons (cadr expression) (cons (caddr expression) '())) state)
         ;(cons (cons (cadr expression) '()) state))))
 
-; bindings are only added when declaring, so no need for checks!
-; add a state, value pair 
-(define addBinding
-  (lambda (var value state)
-    (cons (cons var (car state))
-          (cons (cons value (cadr state)) '()))))
      
 ; assignment
 (define Mstate_assign
  (lambda (expression state)
-   ;(print expression)
    (cons (car state)
-         (cons (replaceBinding (rightOperand expression)
+         (cons (replaceBinding (Mvalue (rightOperand expression) state (lambda(value state) value))
                                (cadr state)
                                (isDeclared (leftOperand expression) (car state) (lambda (v) v))
                                0
-                               (lambda (v) v)) '()))))
-                        
+                               (lambda (v) v)) '()))))     
 
-   
-   ; (if ((isDeclared (cadr expression) (cadr state) (lambda (v) v))
-     
+; calulate expression 
+(define compute
+  (lambda (expression state return)
+   ; (print expression)
+    (cond
+      ; addition
+      ((eq? (statementType expression) '+)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (+ leftVal rightVal))))))
+      ; subtraction
+      ((eq? (statementType expression) '-)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (- leftVal rightVal))))))
+      ; multiplication
+      ((eq? (statementType expression) '*)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (* leftVal rightVal))))))
 
+      ; division
+      ((eq? (statementType expression) '/)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (quotient leftVal rightVal))))))
 
-; determine if a variable has been declared and return its index (-1 if not)
+      ; modulo
+      ((eq? (statementType expression) '%)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (remainder leftVal rightVal))))))                 
+      )))
+
+; determine if a variable has been declared and return its index (error if not)
 (define isDeclared
   (lambda (var varLis return)
     (cond
@@ -150,6 +154,12 @@
       ((eq? var (car varLis)) (return 0))
       ; otherwise, cps recurse
       (else (isDeclared var (cdr varLis) (lambda (v) (return (+ v 1))))))))
+
+; add a state, value pair (called when declaring)
+(define addBinding
+  (lambda (var value state)
+    (cons (cons var (car state))
+          (cons (cons value (cadr state)) '()))))
 
 ; replace an existing binding of a variable, at a given index, with the new value
 (define replaceBinding
@@ -166,19 +176,17 @@
         (return (car valLis))
         (findBinding (cdr valLis) index (+ currIndex 1) (lambda (v) v)))))
 
-;------------------------------------------------- 
+; right operand (pre-fix form)
+(define rightOperand
+  (lambda (expression)
+    (caddr expression)))
 
+; left operand (pre-fix form)
+(define leftOperand
+  (lambda (expression)
+    (cadr expression)))
 
-; OLD
-(define declareVariable
-  (lambda (variable state)
-     (cons (cons variable '()) state)
-    ))
-
-; OLD
-(define declareVariableValue
-  (lambda (variable value state)
-    (cons (cons variable (cons value '())) state)
-    ))
-
-    
+; if the value is an atom
+(define (atom? x)
+  (and (not (null? x))
+       (not (pair? x))))
