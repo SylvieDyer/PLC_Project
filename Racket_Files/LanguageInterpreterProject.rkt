@@ -29,16 +29,15 @@
 
       
       ; entering if statement
+      ((eq? (statementType tree) 'if) (return (Mstate_cond (cdr tree) state)))
 
       ; entering while statement
+
+      ; entering return statement
+      ((eq? (statementType tree) 'return) (return (Mstate_return tree state)))
       (else state)
       
   )))
-
-; returns the statement type 
-(define statementType
-  (lambda (expression)
-    (car expression)))
 
 ; evaluating the value of an expression
 (define Mvalue
@@ -73,7 +72,6 @@
 (define Mstate_var
   (lambda (expression state)
     (if (pair? (cddr expression))
-       
         (addBinding (cadr expression) (caddr expression) state)
         (addBinding (cadr expression) 'NULL state))))
         ;(cons (cons (cadr expression) (cons (caddr expression) '())) state)
@@ -90,11 +88,31 @@
                                0
                                (lambda (v) v)) '()))))     
 
+; if-statements
+(define Mstate_cond
+  (lambda (expression state)
+    (if (compute (car expression state (lambda (v) v)))
+        (evaluateState (cadr expression) state)
+        (evaluateState (caddr expression) state))))
+     
+
+; return statement (adds binding to a special variable "return") 
+(define Mstate_return
+  (lambda (expression state)
+    (Mvalue (cadr expression) state (lambda (value state) (addBinding 'return value state)))))
+
 ; calulate expression 
 (define compute
   (lambda (expression state return)
    ; (print expression)
     (cond
+      ; not
+      ((eq? (statementType expression) '!)
+       (Mvalue (leftOperand expression)
+               (state
+                (lambda (leftVal leftState)
+                  (not leftVal)))))
+      
       ; addition
       ((eq? (statementType expression) '+)
        (Mvalue (leftOperand expression)
@@ -141,7 +159,86 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (remainder leftVal rightVal))))))                 
+                           (remainder leftVal rightVal))))))
+      ; less than
+      ((eq? (statementType expression) '<)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (< leftVal rightVal))))))
+
+      ; greater than 
+      ((eq? (statementType expression) '>)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (> leftVal rightVal))))))
+
+      ; less than or equal to 
+      ((eq? (statementType expression) '<=)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (<= leftVal rightVal))))))
+
+      ; greater than or equal to
+      ((eq? (statementType expression) '>=)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (>= leftVal rightVal))))))
+
+      ; equal
+      ((eq? (statementType expression) '==)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (eq? leftVal rightVal))))))
+
+      ; not equal
+      ((eq? (statementType expression) '!=)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (not (eq? leftVal rightVal)))))))
+
+      ; or
+      ((eq? (statementType expression) '||)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (or leftVal rightVal))))))
+
+      ;and
+      ((eq? (statementType expression) '&&)
+       (Mvalue (leftOperand expression)
+               state
+               (lambda (leftVal leftState)
+                 (Mvalue (rightOperand expression)
+                         leftState
+                         (lambda (rightVal rightState)
+                           (and leftVal rightVal))))))
       )))
 
 ; determine if a variable has been declared and return its index (error if not)
@@ -175,6 +272,14 @@
     (if (eq? index currIndex)
         (return (car valLis))
         (findBinding (cdr valLis) index (+ currIndex 1) (lambda (v) v)))))
+
+
+; ------Abstractions--------------------
+
+; returns the statement type 
+(define statementType
+  (lambda (expression)
+    (car expression)))
 
 ; right operand (pre-fix form)
 (define rightOperand
