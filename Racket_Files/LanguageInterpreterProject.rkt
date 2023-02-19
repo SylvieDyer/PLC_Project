@@ -48,7 +48,7 @@
       ; if the expression is a single number, return the value
       ((number? expression) (return expression state))
       ; if the expression is a variable, find and return the assigned value
-      ((symbol? expression) (return (isDeclared expression (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val) (print val) val)))) state))
+      ((symbol? expression) (return (isDeclared expression (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val) val)))) state))
       ; (findBinding (cadr state) (isDeclared expression (car state) (lambda (v) v)) 0 (lambda (x) x)))
 
       ; --------------- not needed?
@@ -66,7 +66,7 @@
                                                      (return val state))))
 
       ; otherwise, perform calculations (need a different state being returned)
-      (else (compute expression state (lambda (v state) (print "?") (return v state)))))))
+      (else (compute expression state (lambda (v state) (return v state)))))))
 
 
 ; variable declaration 
@@ -122,7 +122,6 @@
                   (Mvalue (rightOperand expression)
                           leftState
                           (lambda (rightVal rightState)
-                            (print rightState)
                             (return (+ leftVal rightVal) rightState))))))
       ; subtraction
       ((eq? (statementType expression) '-)
