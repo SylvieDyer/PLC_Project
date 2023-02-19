@@ -9,7 +9,6 @@
 (define evaluateState
   (lambda (tree state return)
     (cond
-
       ; if the tree is empty or is a single value/variable
       ((null? tree) state)
       ((atom? tree) state)
@@ -19,7 +18,7 @@
                                     state
                                     (lambda (v) (return (evaluateState (cdr tree) v return)))))
       
-      ; --------------------------- otherwise is some kind of statement --------------------------------
+      ; --------------------------- otherwise, is some kind of statement --------------------------------
       
       ; declaring variable
       ((eq? (statementType tree) 'var) (return (Mstate_var tree state)))
@@ -32,12 +31,12 @@
       ((eq? (statementType tree) 'if) (return (Mstate_cond (cdr tree) state)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (print "While Statement Found"))
-      
+      ((eq? (statementType tree) 'while) (return (print "While Statement Found")))
+
       ; entering return statement
       ((eq? (statementType tree) 'return) (return (Mstate_return tree state)))
-      (else state)
       
+      (else state)
   )))
 
 ; evaluating the value of an expression
@@ -48,8 +47,15 @@
       ((null? expression) (return 0 state))
       ; if the expression is a single number, return the value
       ((number? expression) (return expression state))
-      ; if the expression is a variable, find and return the assigned value
-      ((symbol? expression) (return (isDeclared expression (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val) val)))) state))
+      ; if the expression is a variable, determine if it's been declared
+      ((symbol? expression) (return (isDeclared expression
+                                                (car state)
+                                                ; then find the value of the variable 
+                                                (lambda (index) (findBinding (cadr state)
+                                                                             index
+                                                                             0
+                                                                             (lambda (val) val))))
+                            state))
       ; (findBinding (cadr state) (isDeclared expression (car state) (lambda (v) v)) 0 (lambda (x) x)))
 
       ; --------------- not needed?
@@ -76,6 +82,7 @@
     (if (pair? (cddr expression))
         (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)))
         (addBinding (cadr expression) 'NULL state))))
+        
         ;(cons (cons (cadr expression) (cons (caddr expression) '())) state)
         ;(cons (cons (cadr expression) '()) state))))
 
@@ -101,7 +108,8 @@
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state)
-    (Mvalue (cadr expression) state (lambda (value state) (addBinding 'return value state)))))
+    (Mvalue (cadr expression) state (lambda (value state) (print value) (addBinding 'return value state)))))
+    
 
 ; calulate expression 
 (define compute
@@ -273,7 +281,9 @@
 (define findBinding
   (lambda (valLis index currIndex return)
     (if (eq? index currIndex)
-        (return (car valLis))
+        (if (eq? (car valLis) 'NULL)
+            (error "variable has not been assigned")
+            (return (car valLis)))
         (findBinding (cdr valLis) index (+ currIndex 1) (lambda (v) v)))))
 
 
