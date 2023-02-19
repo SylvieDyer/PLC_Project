@@ -19,7 +19,7 @@
                                     state
                                     (lambda (v) (return (evaluateState (cdr tree) v return)))))
       
-      ; otherwise is some kind of statement- 
+      ; --------------------------- otherwise is some kind of statement --------------------------------
       
       ; declaring variable
       ((eq? (statementType tree) 'var) (return (Mstate_var tree state)))
@@ -48,7 +48,8 @@
       ; if the expression is a single number, return the value
       ((number? expression) (return expression state))
       ; if the expression is a variable, find and return the assigned value
-      ((symbol? expression) (print "search for value"))
+      ((symbol? expression) (return (isDeclared expression (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val) (print val) val)))) state))
+      ; (findBinding (cadr state) (isDeclared expression (car state) (lambda (v) v)) 0 (lambda (x) x)))
 
       ; --------------- not needed?
       ; if the expression has a nested expression needing evaluation -> Find the value of the expression 
@@ -61,11 +62,11 @@
                                                    (evaluateState expression state (lambda (v) v))
                                                    (lambda (val state)
                                                      ; updated state!
-                                                     (print state)
+                                                    ; (print state)
                                                      (return val state))))
 
       ; otherwise, perform calculations (need a different state being returned)
-      (else (return (compute expression state (lambda (v) (print "?") (return v state))) state)))))
+      (else (compute expression state (lambda (v state) (print "?") (return v state)))))))
 
 
 ; variable declaration 
@@ -111,17 +112,18 @@
        (Mvalue (leftOperand expression)
                (state
                 (lambda (leftVal leftState)
-                  (not leftVal)))))
+                  (return (not leftVal) leftState)))))
       
       ; addition
       ((eq? (statementType expression) '+)
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           (+ leftVal rightVal))))))
+        (Mvalue (leftOperand expression)
+                state
+                (lambda (leftVal leftState)
+                  (Mvalue (rightOperand expression)
+                          leftState
+                          (lambda (rightVal rightState)
+                            (print rightState)
+                            (return (+ leftVal rightVal) rightState))))))
       ; subtraction
       ((eq? (statementType expression) '-)
        (Mvalue (leftOperand expression)
@@ -130,7 +132,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (- leftVal rightVal))))))
+                           (return (- leftVal rightVal) rightState))))))
       ; multiplication
       ((eq? (statementType expression) '*)
        (Mvalue (leftOperand expression)
@@ -139,7 +141,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (* leftVal rightVal))))))
+                           (return (* leftVal rightVal) rightState))))))
 
       ; division
       ((eq? (statementType expression) '/)
@@ -149,7 +151,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (quotient leftVal rightVal))))))
+                           (return (quotient leftVal rightVal) rightState))))))
 
       ; modulo
       ((eq? (statementType expression) '%)
@@ -159,7 +161,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (remainder leftVal rightVal))))))
+                           (return (remainder leftVal rightVal) rightState))))))
       ; less than
       ((eq? (statementType expression) '<)
        (Mvalue (leftOperand expression)
@@ -168,7 +170,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (< leftVal rightVal))))))
+                           (return (< leftVal rightVal) rightState))))))
 
       ; greater than 
       ((eq? (statementType expression) '>)
@@ -178,7 +180,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (> leftVal rightVal))))))
+                           (return (> leftVal rightVal) rightState))))))
 
       ; less than or equal to 
       ((eq? (statementType expression) '<=)
@@ -188,7 +190,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (<= leftVal rightVal))))))
+                           (return (<= leftVal rightVal) rightState))))))
 
       ; greater than or equal to
       ((eq? (statementType expression) '>=)
@@ -198,7 +200,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (>= leftVal rightVal))))))
+                           (return (>= leftVal rightVal) rightState)))))
 
       ; equal
       ((eq? (statementType expression) '==)
@@ -208,7 +210,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (eq? leftVal rightVal))))))
+                           (return (eq? leftVal rightVal) rightState)))))
 
       ; not equal
       ((eq? (statementType expression) '!=)
@@ -218,7 +220,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (not (eq? leftVal rightVal)))))))
+                           (return (not (eq? leftVal rightVal)) rightState)))))
 
       ; or
       ((eq? (statementType expression) '||)
@@ -228,7 +230,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (or leftVal rightVal))))))
+                           (return (or leftVal rightVal) rightState))))))
 
       ;and
       ((eq? (statementType expression) '&&)
@@ -238,8 +240,8 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (and leftVal rightVal))))))
-      )))
+                           (return (and leftVal rightVal) rightState))))))
+      ))))))
 
 ; determine if a variable has been declared and return its index (error if not)
 (define isDeclared
