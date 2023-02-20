@@ -1,4 +1,1 @@
-var x;
-var y;
-x = x + y;
-return x;
+return 6 * -(4 * 2) + 9;
