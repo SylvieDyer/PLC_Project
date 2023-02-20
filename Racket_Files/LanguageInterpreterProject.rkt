@@ -3,8 +3,7 @@
 
 (define interpret
   (lambda (filename)
-    (evaluateState (parser filename) '(() ()) (lambda (v) v))))
-
+    (evaluateState (parser filename) '((return) (RETURNVAL)) (lambda (finalState) (print finalState) (findBindingByName 'return finalState (lambda (v) v))))))
 
 (define evaluateState
   (lambda (tree state return)
@@ -16,7 +15,9 @@
       ; if there is a nested statement
       ((list? (statementType tree)) (evaluateState (car tree)
                                     state
-                                    (lambda (v) (return (evaluateState (cdr tree) v return)))))
+                                    (lambda (newState)
+                                      (return (evaluateState (cdr tree) newState (lambda (v) v) )))
+                                    ))
       
       ; --------------------------- otherwise, is some kind of statement --------------------------------
       
@@ -100,12 +101,20 @@
 ; if-statements
 (define Mstate_cond
   (lambda (expression state)
+    ; determine if the statement is true or false
     (compute (car expression) state (lambda (val newState)
                                       (if val
-                                          (evaluateState (cadr expression) newState (lambda (v) v))
+                                          ; if true, go through the if-statement
+                                          (evaluateState (cadr expression) newState (lambda (v) v) )
+                                          ; otherwise, check if there is an else condition
                                           (if (null? (cddr expression))
+                                              ; if not, return state
                                               newState
-                                              (evaluateState (caddr expression)newState (lambda (v) v))))))))
+                                              ; if there is, go through the else-statement
+                                              (evaluateState (caddr expression) newState (lambda (v) v) )))
+                                          
+                                      ))))
+
 
 ; while-statements
 (define Mstate_while
@@ -118,8 +127,11 @@
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state)
-    (Mvalue (cadr expression) state (lambda (value state) (print value) (addBinding 'return value state)))))
-    
+
+    (if (eq? (findBindingByName 'return state (lambda (val) val)) 'RETURNVAL)
+        (Mstate_assign (cons '= expression) state)
+        state
+    )))
 
 ; calulate expression 
 (define compute
@@ -295,8 +307,12 @@
             (begin (print valLis)
             (error "variable has not been assigned"))
             (return (car valLis)))
-        (findBinding (cdr valLis) index (+ currIndex 1) (lambda (v) v)))))
+        (findBinding (cdr valLis) index (+ currIndex 1) return))))
 
+; get the value of a variable given its name
+(define findBindingByName
+  (lambda (name state return)
+    (isDeclared name (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val)  val))))))
 
 ; ------Abstractions--------------------
 
