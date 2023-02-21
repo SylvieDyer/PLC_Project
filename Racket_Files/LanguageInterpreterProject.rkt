@@ -59,7 +59,7 @@
                                                                              index
                                                                              0
                                                                              (lambda (val) val))))
-                            state))
+                                    state))
       ; (findBinding (cadr state) (isDeclared expression (car state) (lambda (v) v)) 0 (lambda (x) x)))
 
       ; --------------- not needed?
