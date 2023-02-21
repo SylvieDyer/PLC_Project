@@ -8,9 +8,9 @@
 
 (define parseCode
   (lambda (tree)
+   (findBindingByName 'return
     (call/cc
-     (lambda (k)
-       (evaluateState tree '(()()) (lambda (v) (findBindingByName 'return (varLis v) (valLis v))) k)))))
+     (lambda (k) (evaluateState tree '(()()) (lambda (v) v) k))))))
     
 (define evaluateState
   (lambda (tree state return break)
@@ -42,7 +42,7 @@
       ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state)))
 
       ; entering return statement
-      ((eq? (statementType tree) 'return) (return (Mstate_return tree state)))
+      ((eq? (statementType tree) 'return) (break (Mstate_return tree state)))
 
       ; otherwise return the tate
       (else state))))
@@ -59,7 +59,7 @@
       ((eq? expression 'false) (return #f state))
       ((eq? expression 'true) (return #t state))
       ; if the expression is a variable, return its value 
-      ((symbol? expression)  (return (findBindingByName expression (varLis state) (valLis state))
+      ((symbol? expression)  (return (findBindingByName expression state)
                                     state))
       
       ; if the expression is a assignment, re-compute value and update state
@@ -127,7 +127,8 @@
     ; check the condition
     (Mvalue (car expression) state (lambda (val newState)
                                      (if val
-                                         (Mstate_while expression (evaluateState (cdr expression) newState (lambda (v) v) (lambda (v) v)))
+                                         (evaluateState (cdr expression) state (lambda (v) (Mstate_while expression v)) (lambda (v) v))
+                                         ;(Mstate_while expression (evaluateState (cdr expression) newState (lambda (v) v) (lambda (v) v)))
                                          (Mvalue (car expression) newState (lambda (val2 newState2) newState2)))))))
   ;  (compute (car expression) state (lambda (val newState)
                                     ;  (if val
@@ -341,14 +342,18 @@
 
 ; get the value of a variable given its name
 (define findBindingByName
-  (lambda (name varLis valLis)
+  (lambda (name state)
+    (findBindingByNameHelper name (varLis state) (valLis state))))
+
+(define findBindingByNameHelper
+ (lambda (name varLis valLis)
     (cond
       ; if either list is empty, variable has not been declared- throw error 
       ((or (null? varLis) (null? valLis)) (error "Variable has not been declared yet"))
       ; if the name is found, return coresponding value
       ((eq? name (car varLis)) (parseValue (car valLis)))
       ; otherwise keep searching
-      (else (findBindingByName name (cdr varLis) (cdr valLis))))))
+      (else (findBindingByNameHelper name (cdr varLis) (cdr valLis))))))
 
 ; returns a proper value or error
 (define parseValue
