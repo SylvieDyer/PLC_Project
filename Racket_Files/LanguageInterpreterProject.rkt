@@ -3,20 +3,28 @@
 
 (define interpret
   (lambda (filename)
-    (evaluateState (parser filename) '((return) (RETURNVAL)) (lambda (finalState) (print finalState) (findBindingByName 'return finalState (lambda (v) v))))))
+    (parseCode (parser filename))))
+    ;(evaluateState (parser filename) '(() ()) (lambda (finalState) (print finalState) (findBindingByName 'return (varLis finalState) (valLis finalState))))))
 
+(define parseCode
+  (lambda (tree)
+    (call/cc
+     (lambda (k)
+       (evaluateState tree '(()()) (lambda (v) (findBindingByName 'return (varLis v) (valLis v))) k)))))
+    
 (define evaluateState
-  (lambda (tree state return)
+  (lambda (tree state return break)
     (cond
       ; if the tree is empty or is a single value/variable
       ((null? tree) state)
       ((atom? tree) state)
 
-      ; if there is a nested statement
+      ; if there is a nested statement, evaluate that statement, then the rest
       ((list? (statementType tree)) (evaluateState (car tree)
                                     state
                                     (lambda (newState)
-                                      (return (evaluateState (cdr tree) newState (lambda (v) v) )))
+                                      (return (evaluateState (cdr tree) newState (lambda (v) v) break)))
+                                    break
                                     ))
       
       ; --------------------------- otherwise, is some kind of statement --------------------------------
@@ -35,49 +43,37 @@
 
       ; entering return statement
       ((eq? (statementType tree) 'return) (return (Mstate_return tree state)))
-      
-      (else state)
-  )))
+
+      ; otherwise return the tate
+      (else state))))
 
 ; evaluating the value of an expression
 (define Mvalue
   (lambda (expression state return)
-
     (cond
+      ; if the expression is empty, value is null
       ((null? expression) (return 'NULL state))
       ; if the expression is a single number, return the value
       ((number? expression) (return expression state))
       ; if the variable is true or false
       ((eq? expression 'false) (return #f state))
       ((eq? expression 'true) (return #t state))
-      ;((or (eq? expression 'false) (eq? expression 'true)) (return expression state))
-      ; if the expression is a variable, determine if it's been declared
-      ((symbol? expression) (return (isDeclared expression
-                                                (car state)
-                                                ; then find the value of the variable 
-                                                (lambda (index) (findBinding (cadr state)
-                                                                             index
-                                                                             0
-                                                                             (lambda (val) val))))
+      ; if the expression is a variable, return its value 
+      ((symbol? expression)  (return (findBindingByName expression (varLis state) (valLis state))
                                     state))
-      ; (findBinding (cadr state) (isDeclared expression (car state) (lambda (v) v)) 0 (lambda (x) x)))
-
-      ; --------------- not needed?
-      ; if the expression has a nested expression needing evaluation -> Find the value of the expression 
-      ; ((list? (statementType expression)) (Mvalue (car expression) (evaluateState (car expression) state (lambda (v) v)) return))
-      ;((list? (car expression)) (evaluateState (car expression) state (lambda (state) (Mvalue (car expression) state (lambda (value state) (return value state))))))
-      ; ----------------
-
-      ; if the expression is a assignment, update state
-      ((eq? (statementType expression) '=) (Mvalue (rightOperand expression)
-                                                   (evaluateState expression state (lambda (v) v))
-                                                   (lambda (val state)
-                                                     ; updated state!
-                                                    ; (print state)
-                                                     (return val state))))
+      
+      ; if the expression is a assignment, re-compute value and update state
+      ((eq? (statementType expression) '=) (evaluateState expression state (lambda (newState) (Mvalue (rightOperand expression) newState (lambda (val s) (return val s)))) (lambda (v) v)))
+     ;  (Mvalue (rightOperand expression)
+                                                 ;  (evaluateState expression state (lambda (v) v) (lambda (v) v))
+                                                   ;(lambda (val state) (return val state))))
+      ; if the epxression has a sub list (ONLY CASE SHOULD BE "return 6 * 20 +40;" etc --> otherwise there would be an operator in prefix)?
+      ((list? (car expression)) (Mvalue (car expression)
+                                        (evaluateState (car expression) state (lambda (v) v) (lambda (v) v))
+                                        (lambda (val state) (print val) (return val state))))
 
       ; otherwise, perform calculations (need a different state being returned)
-      (else (compute expression state (lambda (v state) (return v state)))))))
+      (else (compute expression state (lambda (val newState) (return val newState)))))))
 
 
 ; variable declaration 
@@ -86,55 +82,52 @@
     (if (pair? (cddr expression))
         (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)))
         (addBinding (cadr expression) 'NULL state))))
-        
-        ;(cons (cons (cadr expression) (cons (caddr expression) '())) state)
-        ;(cons (cons (cadr expression) '()) state))))
-
      
 ; assignment
 (define Mstate_assign
  (lambda (expression state)
-   (cons (car state)
-         (cons (replaceBinding (Mvalue (rightOperand expression) state (lambda(value state) value))
-                               (cadr state)
-                               (isDeclared (leftOperand expression) (car state) (lambda (v) v))
-                               0
-                               (lambda (v) v)) '()))))     
+   ; check if the variable has been declared yet
+   (if (isDeclared (leftOperand expression) state)
+       ; if it is - cons the variable list with the updated value list
+       (cons (varLis state)
+             (Mvalue (rightOperand expression) state (lambda (value newState)
+                                                       (replaceBinding value (valLis newState)
+                                                                       (indexOfVariable (leftOperand expression) newState)
+                                                                       0
+                                                                       (lambda (v) (cons v '()))))))
+             ; cons the variable list with an empty list (keep variables in a separate list
+           ;  (replaceBinding (Mvalue (rightOperand expression) state (lambda(value state) value))
+                     ;        (valLis state)
+                     ;        (indexOfVariable (leftOperand expression) state)
+                       ;      0
+                        ;     (lambda (v) (cons v '()))
+                         ;    ))
+       ; otherwise throw an error
+       (error "Cannot asign variable: variable has not been declared yet"))))
 
 ; if-statements
 (define Mstate_cond
   (lambda (expression state)
-   
-  ;  (print (Mvalue expression state (lambda (v1) v1)))
-
-    ; determine if the statement is true or false
-;    (if (atom? (car expression))
-;        (Mvalue (car expression) state (lambda (val newState)
-;                                         (if val
-;                                             (evaluateState (cadr expression) newState (lambda (v) v) )
-;                                             (if (null? (cddr expression))
-;                                                 newState
-;                                                 (evaluateState (caddr expression) newState (lambda  (v) v))))))
-        (Mvalue (car expression) state (lambda (val newState)
-                                      (if val
-                                          ; if true, go through the if-statement
-                                          (evaluateState (cadr expression) newState (lambda (v) v) )
-                                          ; otherwise, check if there is an else condition
-                                          (if (null? (cddr expression))
-                                              ; if not, return state
-                                              newState
-                                              ; if there is, go through the else-statement
-                                              (evaluateState (caddr expression) newState (lambda (v) v) )))
-                                          
-                                      ))))
+    ; determine the boolean value of the condition
+    (Mvalue (car expression) state (lambda (val newState)
+                                     (if val
+                                         ; if true, go through the if-statement
+                                         (evaluateState (cadr expression) newState (lambda (v) v) (lambda (v) v))
+                                         ; otherwise, check if there is an else condition
+                                         (if (null? (cddr expression))
+                                             ; if not, return state
+                                             newState
+                                             ; if there is, go through the else-statement
+                                             (evaluateState (caddr expression) newState (lambda (v) v) (lambda (v) v))))))))
 
 
 ; while-statements
 (define Mstate_while
   (lambda (expression state)
+    ; check the condition
     (Mvalue (car expression) state (lambda (val newState)
                                      (if val
-                                         (evaluateState (cdr expression) newState (lambda (v) v))
+                                         (Mstate_while expression (evaluateState (cdr expression) newState (lambda (v) v) (lambda (v) v)))
                                          (Mvalue (car expression) newState (lambda (val2 newState2) newState2)))))))
   ;  (compute (car expression) state (lambda (val newState)
                                     ;  (if val
@@ -144,11 +137,12 @@
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state)
-    (if (eq? (findBindingByName 'return state (lambda (val) val)) 'RETURNVAL)
-        (Mstate_assign (cons '= expression) state)
+    ; if 'return has already been assigned, do not re-assign
+    (if (isDeclared 'return state)
         state
-    )))
-
+        (Mvalue (cdr expression) state (lambda (value newState) (addBinding 'return value newState))))))
+       ; (addBinding 'return (Mvalue (cdr expression) state (lambda (val state) (val state)) state))))
+  
 ; calulate expression 
 (define compute
   (lambda (expression state return)
@@ -210,7 +204,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (return (remainder leftVal rightVal) rightState)))))) ; issue here?
+                           (return (remainder leftVal rightVal) rightState))))))
       ; less than
       ((eq? (statementType expression) '<)
        (Mvalue (leftOperand expression)
@@ -259,7 +253,7 @@
                  (Mvalue (rightOperand expression)
                          leftState
                          (lambda (rightVal rightState)
-                           (return (if (eq? leftVal rightVal) ; if statement is to store as 'true 'false instead of #t #f
+                           (return (if (eq? leftVal rightVal) ; if statement converts 'true and 'false into #t / #f
                                        #t
                                        #f)
                                        rightState))))))
@@ -293,25 +287,39 @@
                          leftState
                          (lambda (rightVal rightState)
                            (return (and leftVal rightVal) rightState))))))
-      (else (return (car expression)))
+      
+      (else (Mvalue (car expression) state (lambda (value newState) (return value newState))))
       )))
 
-; determine if a variable has been declared and return its index (error if not)
+; returns true if a variable has been declared already 
 (define isDeclared
-  (lambda (var varLis return)
-    (cond
-      ; if there are no delcared variables, var is undeclared
-      ((null? varLis) (error "variable not declared: " var))
-      ; otherwise, check to see if the variable is found
-      ((eq? var (car varLis)) (return 0))
-      ; otherwise, cps recurse
-      (else (isDeclared var (cdr varLis) (lambda (v) (return (+ v 1))))))))
+  (lambda (var state)
+    (not (eq? (indexOfVariable var state) -1))))
 
-; add a state, value pair (called when declaring)
+; indexOfVarible - returns the index of a variable
+(define indexOfVariable
+  (lambda (var state)
+    (call/cc
+     (lambda (k) (indexOfVariable-break var (car state) 0 k)))))
+
+(define indexOfVariable-break
+  (lambda (var varLis index break)
+    (cond
+      ; if variable has not been declared, immediately return -1 
+      ((null? varLis) (break -1))
+      ; if the variable has been found, immediately return the index
+      ((eq? var (car varLis)) (break index))
+      ; otherwise keep searching
+      (else (indexOfVariable-break var (cdr varLis) (+ 1 index) break)))))
+
+; adds a variable and value pair to the state
 (define addBinding
   (lambda (var value state)
-    (cons (cons var (car state))
-          (cons (cons value (cadr state)) '()))))
+    ; if the variable has already been declared, shouldn't be declared again
+    (if (isDeclared var state)
+        (error "Variable has already been declared")
+        (cons (cons var (varLis state))
+              (cons (cons value (valLis state))'())))))
 
 ; replace an existing binding of a variable, at a given index, with the new value
 (define replaceBinding
@@ -319,7 +327,6 @@
     (if (eq? index currIndex)
         (return (cons value (cdr valLis)))
         (replaceBinding value (cdr valLis) index (+ currIndex 1) (lambda (v) (return (cons (car valLis) v)))))))
-
 
 ; get the value of a variable, at a given index
 (define findBinding
@@ -334,10 +341,35 @@
 
 ; get the value of a variable given its name
 (define findBindingByName
-  (lambda (name state return)
-    (isDeclared name (car state) (lambda (index) (findBinding (cadr state) index 0 (lambda (val) val))))))
+  (lambda (name varLis valLis)
+    (cond
+      ; if either list is empty, variable has not been declared- throw error 
+      ((or (null? varLis) (null? valLis)) (error "Variable has not been declared yet"))
+      ; if the name is found, return coresponding value
+      ((eq? name (car varLis)) (parseValue (car valLis)))
+      ; otherwise keep searching
+      (else (findBindingByName name (cdr varLis) (cdr valLis))))))
 
+; returns a proper value or error
+(define parseValue
+  (lambda (value)
+    (cond
+      ((eq? value 'NULL)     (error "Variable has not been assigned"))
+      ((eq? value #t)        'true)
+      ((eq? value #f)        'false)
+      (else                  value))))
+                             
 ; ------Abstractions--------------------
+
+; returns the state's variables
+(define varLis
+  (lambda (state)
+    (car state)))
+
+; returns the state's values
+(define valLis
+  (lambda (state)
+    (cadr state)))
 
 ; returns the statement type 
 (define statementType
