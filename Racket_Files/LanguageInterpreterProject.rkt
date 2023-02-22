@@ -1,11 +1,16 @@
 #lang racket
+
+;-------------------------------------------------------------------
+;
+;    By: Sylvie Dyer & Luis Torres
+;
+;-------------------------------------------------------------------
 (require "simpleParser.rkt")
 
 (define interpret
   (lambda (filename)
     (parseCode (parser filename))))
-    ;(evaluateState (parser filename) '(() ()) (lambda (finalState) (print finalState) (findBindingByName 'return (varLis finalState) (valLis finalState))))))
-
+   
 (define parseCode
   (lambda (tree)
    (findBindingByName 'return
@@ -64,13 +69,11 @@
       
       ; if the expression is a assignment, re-compute value and update state
       ((eq? (statementType expression) '=) (evaluateState expression state (lambda (newState) (Mvalue (rightOperand expression) newState (lambda (val s) (return val s)))) (lambda (v) v)))
-     ;  (Mvalue (rightOperand expression)
-                                                 ;  (evaluateState expression state (lambda (v) v) (lambda (v) v))
-                                                   ;(lambda (val state) (return val state))))
+
       ; if the epxression has a sub list (ONLY CASE SHOULD BE "return 6 * 20 +40;" etc --> otherwise there would be an operator in prefix)?
       ((list? (car expression)) (Mvalue (car expression)
                                         (evaluateState (car expression) state (lambda (v) v) (lambda (v) v))
-                                        (lambda (val state) (print val) (return val state))))
+                                        (lambda (val state) (return val state))))
 
       ; otherwise, perform calculations (need a different state being returned)
       (else (compute expression state (lambda (val newState) (return val newState)))))))
@@ -95,15 +98,8 @@
                                                                        (indexOfVariable (leftOperand expression) newState)
                                                                        0
                                                                        (lambda (v) (cons v '()))))))
-             ; cons the variable list with an empty list (keep variables in a separate list
-           ;  (replaceBinding (Mvalue (rightOperand expression) state (lambda(value state) value))
-                     ;        (valLis state)
-                     ;        (indexOfVariable (leftOperand expression) state)
-                       ;      0
-                        ;     (lambda (v) (cons v '()))
-                         ;    ))
        ; otherwise throw an error
-       (error "Cannot asign variable: variable has not been declared yet"))))
+       (error "Cannot asign variable: variable has not been declared yet: " (leftOperand expression)))))
 
 ; if-statements
 (define Mstate_cond
@@ -128,12 +124,7 @@
     (Mvalue (car expression) state (lambda (val newState)
                                      (if val
                                          (evaluateState (cdr expression) state (lambda (v) (Mstate_while expression v)) (lambda (v) v))
-                                         ;(Mstate_while expression (evaluateState (cdr expression) newState (lambda (v) v) (lambda (v) v)))
                                          (Mvalue (car expression) newState (lambda (val2 newState2) newState2)))))))
-  ;  (compute (car expression) state (lambda (val newState)
-                                    ;  (if val
-                                         ; (Mstate_while expression (evaluateState (cadr expression) newState (lambda (v) v)))
-                                          ; (compute (car expression) newState (lambda (val news) news)))))))
 
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
@@ -142,8 +133,7 @@
     (if (isDeclared 'return state)
         state
         (Mvalue (cdr expression) state (lambda (value newState) (addBinding 'return value newState))))))
-       ; (addBinding 'return (Mvalue (cdr expression) state (lambda (val state) (val state)) state))))
-  
+       
 ; calulate expression 
 (define compute
   (lambda (expression state return)
@@ -318,7 +308,7 @@
   (lambda (var value state)
     ; if the variable has already been declared, shouldn't be declared again
     (if (isDeclared var state)
-        (error "Variable has already been declared")
+        (error "Variable has already been declared: " var)
         (cons (cons var (varLis state))
               (cons (cons value (valLis state))'())))))
 
@@ -349,7 +339,7 @@
  (lambda (name varLis valLis)
     (cond
       ; if either list is empty, variable has not been declared- throw error 
-      ((or (null? varLis) (null? valLis)) (error "Variable has not been declared yet"))
+      ((or (null? varLis) (null? valLis)) (error "Variable has not been declared yet: " name))
       ; if the name is found, return coresponding value
       ((eq? name (car varLis)) (parseValue (car valLis)))
       ; otherwise keep searching
