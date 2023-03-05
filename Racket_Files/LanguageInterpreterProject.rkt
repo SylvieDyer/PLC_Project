@@ -17,9 +17,9 @@
   (lambda (tree)
     ; gets the return value 
     (findBindingByName 'return
-                       (call/cc
+                       (call/cc 
                         ; evaluates the state of the code, with a break-out method 
-                        (lambda (k) (evaluateState tree '(()()) (lambda (v) v) k))))))
+                        (lambda (k) (evaluateState tree '((()())) (lambda (v) v) k))))))
 
 ; determines the state of an expression 
 (define evaluateState
@@ -35,6 +35,8 @@
                                                    (lambda (newState)
                                                      (return (evaluateState (cdr tree) newState (lambda (v) v) break)))
                                                    break))
+
+      ((eq? (statementType tree) 'begin) (evaluateState (cdr tree) (addLayer state) (lambda (newState) (return (removeLayer newState))) break))
       
       ; --------------------------- otherwise, is some kind of statement --------------------------------
       
@@ -109,7 +111,7 @@
        ; if it is - cons the variable list with the updated value list
        (cons (varLis state)
              (Mvalue (rightOperand expression) state (lambda (value newState)
-                                                       (replaceBinding value (valLis newState)
+                                                       (replaceBinding value (valLis newState) newState
                                                                        (indexOfVariable (leftOperand expression) newState)
                                                                        0
                                                                        (lambda (v) (cons v '()))))))
@@ -339,28 +341,37 @@
       (else (Mvalue (car expression) state (lambda (value newState) (return value newState))))
       )))
 
-; returns true if a variable has been declared already 
+ ;returns true if a variable has been declared already 
 (define isDeclared
   (lambda (var state)
-    (not (eq? (indexOfVariable var state) -1))))
+   ; (indexOfVariable var state 0)))
+   (not (eq? (cadr (indexOfVariable var state 0)) -1))))
 
-; indexOfVarible - returns the index of a variable
+; indexOfVaiable - returns the layer and index of a variable (layer index)
 (define indexOfVariable
-  (lambda (var state)
+  (lambda (var state layer)
     (call/cc
-     (lambda (k) (indexOfVariable-break var (car state) 0 k)))))
+     ; call the helper with the given inputs
+     (lambda (break) (indexOfVariable-break var (caar state) 0 layer
+                                            ; make continuation function call the rest of the state with updated layer
+                                            (lambda (result) (if (null? (cdr state))
+                                                                 result
+                                                                 (indexOfVariable var (cdr state) (+ 1 layer))))
+                                            ; pass in the break 
+                                            break)))))
 
-; returns the index of a variable, incorporating the break
+; returns the layer and index of a variable, incorporating the break 
 (define indexOfVariable-break
-  (lambda (var varLis index break)
+  (lambda (var varLis index layer return break)
     (cond
-      ; if variable has not been declared, immediately return -1 
-      ((null? varLis)         (break -1))
-      ; if the variable has been found, immediately return the index
-      ((eq? var (car varLis)) (break index))
-      ; otherwise keep searching
-      (else                   (indexOfVariable-break var (cdr varLis) (+ 1 index) break)))))
-
+      ; if nothing has been found, return default list
+      ((null? varLis)          (return '(-1 -1)))
+      ; otherwise, immediately return the layer and index
+      ((eq? var (car varLis))  (break (cons layer (cons index '()))))
+      ; otherwise, continue searching 
+      (else                    (indexOfVariable-break var (cdr varLis) (+ 1 index) layer return break)))))
+                               
+                               
 ; adds a variable and value pair to the state
 (define addBinding
   (lambda (var value state)
@@ -368,19 +379,31 @@
     (if (isDeclared var state)
         ; ... can't redeclare
         (error "Variable has already been declared: " var)
-        ; otherwise, add binding to the state
-        (cons (cons var (varLis state))
-              (cons (cons value (valLis state))'())))))
+        ; otherwise, combine first layer to rest of state where... 
+        (cons
+         ; add binding to the first layer of the state
+         (cons (cons var (varLis (currentLayer state)))
+               (cons (cons value (valLis (currentLayer state))) '()))
+         ; rest of the state (unchanged) 
+         (cdr state)))))
 
 ; replace an existing binding of a variable, at a given index, with the new value
-(define replaceBinding
+(define replaceBinding 
   (lambda (value valLis index currIndex return)
     ; if found the index
-    (if (eq? index currIndex)
+    (cond
+      ; Are in the same layer
+      ((eq? (car index) (car currIndex))
+       (if (eq? (cdr index) (cdr currIndex))
+           (return (cons value (cdr valLis)))
+           (replaceBinding value valLis state index (cons (car currIndex) (cons (+ (cadr currIndex) 1) '())))))
+      ; Are in different layer
+      (else (replaceBinding value ( (removeLayer state)
+    (if (eq? (car index) (car currIndex))
         ; replace the value and return
         (return (cons value (cdr valLis)))
         ; continue searching
-        (replaceBinding value (cdr valLis) index (+ currIndex 1) (lambda (v) (return (cons (car valLis) v)))))))
+        (replaceBinding value (cdr valLis) index (+ currIndex 1) (lambda (v) (return (cons (car valLis) v)))))))))))
 
 ; get the value of a variable, at a given index
 (define findBinding
@@ -419,6 +442,44 @@
                              
 ; ------Abstractions--------------------
 
+; Adds a layer to the state
+(define addLayer
+  (lambda (state)
+    (cons '(()()) state)))
+
+; Removes the top layer from the given state
+(define removeLayer
+  (lambda (state)
+    (cdr state)))
+
+; Return the current (first) layer of the state
+(define currentLayer
+  (lambda (state)
+    (car state)))
+
+; Gets the specified layer
+(define getLayer
+  (lambda (layer state)
+    (getLayer-helper layer 0 state (lambda (v) v))))
+
+(define getLayer-helper
+  (lambda (layer currLayer state return)
+    (if (eq? layer currLayer)
+        (return (car state))
+        (getLayer-helper layer (+ 1 currLayer) (cdr state) return))))
+
+; Replaces the specified layer
+(define replaceLayer
+  (lambda (layer newLayer state)
+    (replaceLayer-helper layer 0 state newLayer (lambda (v) v))))
+    
+(define replaceLayer-helper
+  (lambda (layer currLayer state newLayer return)
+    (if (eq? layer currLayer)
+        (return (cons newLayer (cdr state)))
+        (replaceLayer-helper layer (+ 1 currLayer) (cdr state) newLayer (lambda (restOfState) (return (cons (car state) restOfState)))))))
+    
+    
 ; returns the state's variables
 (define varLis
   (lambda (state)
