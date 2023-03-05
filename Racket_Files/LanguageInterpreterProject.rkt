@@ -106,17 +106,10 @@
 ; assignment
 (define Mstate_assign
  (lambda (expression state)
-   ; check if the variable has been declared yet
-   (if (isDeclared (leftOperand expression) state)
-       ; if it is - cons the variable list with the updated value list
-       (cons (varLis state)
-             (Mvalue (rightOperand expression) state (lambda (value newState)
-                                                       (replaceBinding value (valLis newState) newState
-                                                                       (indexOfVariable (leftOperand expression) newState)
-                                                                       0
-                                                                       (lambda (v) (cons v '()))))))
-       ; otherwise throw an error
-       (error "Cannot asign variable: variable has not been declared yet: " (leftOperand expression)))))
+   ; calculate the value of the assignment
+   (Mvalue (rightOperand expression) state (lambda (value newState)
+                                             ; account for side effects, and replace the binding 
+                                             (replaceBinding (leftOperand expression) value newState)))))
 
 ; if-statements
 (define Mstate_cond
@@ -177,6 +170,8 @@
                   (Mvalue (rightOperand expression)
                           leftState
                           (lambda (rightVal rightState)
+                          
+                           
                             ; return the sum of the two, and the new state 
                             (return (+ leftVal rightVal) rightState))))))
       ; subtraction
@@ -379,57 +374,64 @@
     (if (isDeclared var state)
         ; ... can't redeclare
         (error "Variable has already been declared: " var)
-        ; otherwise, combine first layer to rest of state where... 
-        (cons
-         ; add binding to the first layer of the state
-         (cons (cons var (varLis (currentLayer state)))
-               (cons (cons value (valLis (currentLayer state))) '()))
-         ; rest of the state (unchanged) 
-         (cdr state)))))
-
+        ; otherwise, replace the first layer of the state
+        (replaceLayer 0
+                      ; add binding to the first layer of the state
+                      (cons
+                       (cons var (varLis (currentLayer state)))
+                       (cons (cons value (valLis (currentLayer state))) '()))
+                      state))))
+         
+; replace an existing binding of a variable
+(define replaceBinding
+  (lambda (var value state)
+    ; get the (layer index) of the variable
+    (let ([variableInfo (indexOfVariable var state 0)])
+      ; if the layer is -1, variable hasn't been declared
+      (if (eq? (car variableInfo) -1)
+         (error "Cannot asign variable: variable has not been declared yet:" var)
+         ; get the layer that needs to be updated
+         (let ([layer (getLayer (car variableInfo) state)])
+           ; replace the existing binding 
+           (replaceBindingInLayer value (valLis layer) (cadr variableInfo) 0
+                                  (lambda (newValLis)
+                                    ; update the state & replace the old layer with the new one 
+                                    (replaceLayer (car variableInfo)
+                                                  (cons (varLis layer)
+                                                        (cons newValLis '()))
+                                                  state))))))))
+      
 ; replace an existing binding of a variable, at a given index, with the new value
-(define replaceBinding 
+(define replaceBindingInLayer 
   (lambda (value valLis index currIndex return)
-    ; if found the index
-    (cond
-      ; Are in the same layer
-      ((eq? (car index) (car currIndex))
-       (if (eq? (cdr index) (cdr currIndex))
-           (return (cons value (cdr valLis)))
-           (replaceBinding value valLis state index (cons (car currIndex) (cons (+ (cadr currIndex) 1) '())))))
-      ; Are in different layer
-      (else (replaceBinding value ( (removeLayer state)
-    (if (eq? (car index) (car currIndex))
-        ; replace the value and return
-        (return (cons value (cdr valLis)))
-        ; continue searching
-        (replaceBinding value (cdr valLis) index (+ currIndex 1) (lambda (v) (return (cons (car valLis) v)))))))))))
-
-; get the value of a variable, at a given index
-(define findBinding
-  (lambda (valLis index currIndex return)
-    ; if the current index is the same:
     (if (eq? index currIndex)
-        ; return the value 
-        (parseValue (car valLis))
-         ; otherwise continue searcihing 
-        (findBinding (cdr valLis) index (+ currIndex 1) return))))
+        (return (cons value (cdr valLis)))
+        (replaceBindingInLayer value (cdr valLis) index (+ currIndex 1) (lambda (v) (return (cons (car valLis) v)))))))
 
-; get the value of a variable given its name
+; gets the value of a variable given its name 
 (define findBindingByName
   (lambda (name state)
-    (findBindingByNameHelper name (varLis state) (valLis state))))
-
+    (call/cc
+     ; calls helper on the current layer
+     (lambda (break) (findBindingByName-helper name (varLis (currentLayer state)) (valLis (currentLayer state))
+                                              (lambda (val)
+                                                ; if there are no more layers and nothing has been found, error
+                                                (if (and (null? (cdr state)) (eq? val -1))
+                                                     (error "Variable has not been declared yet: " name)
+                                                     ; otherwise recurse on the rest of the state
+                                                     (findBindingByName name (cdr state))))
+                                              break)))))
+                                                    
 ; helper method that splits the state to recursively search
-(define findBindingByNameHelper
- (lambda (name varLis valLis)
+(define findBindingByName-helper
+ (lambda (name varLis valLis return break)
     (cond
       ; if either list is empty, variable has not been declared- throw error 
-      ((or (null? varLis)       (null? valLis)) (error "Variable has not been declared yet: " name))
+      ((or (null? varLis) (null? valLis)) (return -1))
       ; if the name is found, return coresponding value
-      ((eq? name (car varLis)) (parseValue (car valLis)))
+      ((eq? name (car varLis)) (break (parseValue (car valLis))))
       ; otherwise keep searching
-      (else                    (findBindingByNameHelper name (cdr varLis) (cdr valLis))))))
+      (else                    (findBindingByName-helper name (cdr varLis) (cdr valLis) return break)))))
 
 ; returns a proper value or error
 (define parseValue
@@ -464,8 +466,11 @@
 
 (define getLayer-helper
   (lambda (layer currLayer state return)
+    ; if the layer has been found 
     (if (eq? layer currLayer)
+        ; return the layer
         (return (car state))
+        ; otherwise, keep searching 
         (getLayer-helper layer (+ 1 currLayer) (cdr state) return))))
 
 ; Replaces the specified layer
@@ -475,9 +480,14 @@
     
 (define replaceLayer-helper
   (lambda (layer currLayer state newLayer return)
+    ; if the layer to be replaced has been found 
     (if (eq? layer currLayer)
+        ; replace the layer
         (return (cons newLayer (cdr state)))
-        (replaceLayer-helper layer (+ 1 currLayer) (cdr state) newLayer (lambda (restOfState) (return (cons (car state) restOfState)))))))
+        ; otherwise, recurse on the remainder of the state
+        (replaceLayer-helper layer (+ 1 currLayer) (cdr state) newLayer
+                             ; and return the cons of the first part of the state with the result
+                             (lambda (restOfState) (return (cons (car state) restOfState)))))))
     
     
 ; returns the state's variables
