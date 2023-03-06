@@ -1,0 +1,14 @@
+#lang racket
+(require "LanguageInterpreterProject.rkt")
+
+(define runTest
+  (lambda (v)
+    (runTest-helper '( ("t1.txt" )  )))
+
+(define runTest-helper
+  (lambda (tests)
+    (print (car tests))
+    (if (eq? (interpret (caar tests)) (cdar tests))
+        (println "Warm Fuzzies")
+        (println "Test Failed :("))
+    (runTest-helper (cdr tests))))

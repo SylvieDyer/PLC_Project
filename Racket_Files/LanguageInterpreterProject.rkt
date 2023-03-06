@@ -6,6 +6,7 @@
 ;
 ;-------------------------------------------------------------------
 (require "simpleParser.rkt")
+(provide (all-defined-out))
 
 ; interprets a file with code
 (define interpret
