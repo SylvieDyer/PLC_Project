@@ -16,7 +16,8 @@
 ; given a tree-structure of code, determines the state and returns its return value 
 (define parseCode
   (lambda (tree)
-    ; gets the return value 
+    ; gets the return value
+    ;(call/cc (lambda (k) (evaluateState tree '((()())) (lambda (v) v) k)))));(lambda (v2) (findBindingByName 'return k))))) 
     (findBindingByName 'return
                        (call/cc 
                         ; evaluates the state of the code, with a break-out method 
@@ -371,17 +372,19 @@
 ; adds a variable and value pair to the state
 (define addBinding
   (lambda (var value state)
-    ; if the variable has already been declared... 
-    (if (isDeclared var state)
+    ; if the variable has already been declared...
+    (cond
+      ((eq? var 'return) (replaceLayer (getNumLayers state) (cons (cons var (varLis (getLayer (getNumLayers state) state))) (cons (cons value (valLis (getLayer (getNumLayers state) state))) '())) state))
+    ( (isDeclared var state)
         ; ... can't redeclare
-        (error "Variable has already been declared: " var)
+        (error "Variable has already been declared: " var))
         ; otherwise, replace the first layer of the state
-        (replaceLayer 0
+        (else (replaceLayer 0
                       ; add binding to the first layer of the state
                       (cons
                        (cons var (varLis (currentLayer state)))
                        (cons (cons value (valLis (currentLayer state))) '()))
-                      state))))
+                      state)))))
          
 ; replace an existing binding of a variable
 (define replaceBinding
@@ -444,6 +447,17 @@
       (else                  value))))
                              
 ; ------Abstractions--------------------
+
+; Add to the top layer
+(define getNumLayers
+  (lambda (state)
+    (getNumLayers-helper 0 state (lambda (v) v))))
+
+(define getNumLayers-helper
+  (lambda (currNum state return)
+    (if (null? (cdr state))
+        (return currNum)
+        (getNumLayers-helper (+ currNum 1) (cdr state) return))))
 
 ; Adds a layer to the state
 (define addLayer
