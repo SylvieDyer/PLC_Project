@@ -11,10 +11,10 @@
 ; interprets a file with code
 (define interpret
   (lambda (filename)
-    (parseCode (parser filename))))
+    (interpretCode (parser filename))))
 
 ; given a tree-structure of code, determines the state and returns its return value 
-(define parseCode
+(define interpretCode
   (lambda (tree)
     ; gets the return value
     ;(call/cc (lambda (k) (evaluateState tree '((()())) (lambda (v) v) k)))));(lambda (v2) (findBindingByName 'return k))))) 
@@ -375,7 +375,7 @@
   (lambda (var value state)
     ; if the variable has already been declared...
     (cond
-      ((eq? var 'return) (replaceLayer (getNumLayers state) (cons (cons var (varLis (getLayer (getNumLayers state) state))) (cons (cons value (valLis (getLayer (getNumLayers state) state))) '())) state))
+      ;((eq? var 'return) (replaceLayer (getNumLayers state) (cons (cons var (varLis (getLayer (getNumLayers state) state))) (cons (cons value (valLis (getLayer (getNumLayers state) state))) '())) state))
     ( (isDeclared var state)
         ; ... can't redeclare
         (error "Variable has already been declared: " var))
