@@ -6,16 +6,18 @@
 ;
 ;-------------------------------------------------------------------
 (require "simpleParser.rkt")
+(provide (all-defined-out))
 
 ; interprets a file with code
 (define interpret
   (lambda (filename)
-    (parseCode (parser filename))))
+    (interpretCode (parser filename))))
 
 ; given a tree-structure of code, determines the state and returns its return value 
-(define parseCode
+(define interpretCode
   (lambda (tree)
-    ; gets the return value 
+    ; gets the return value
+    ;(call/cc (lambda (k) (evaluateState tree '((()())) (lambda (v) v) k)))));(lambda (v2) (findBindingByName 'return k))))) 
     (findBindingByName 'return
                        (call/cc 
                         ; evaluates the state of the code, with a break-out method 
@@ -41,26 +43,26 @@
       ; --------------------------- otherwise, is some kind of statement --------------------------------
       
       ; declaring variable
-      ((eq? (statementType tree) 'var) (return (Mstate_var tree state)))
+      ((eq? (statementType tree) 'var) (return (Mstate_var tree state break)))
       
       ; assigning variable
-      ((eq? (statementType tree) '=)   (return (Mstate_assign tree state)))
+      ((eq? (statementType tree) '=)   (return (Mstate_assign tree state break)))
  
       ; entering if statement
-      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state)))
+      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state break)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state)))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state break)))
 
       ; entering return statement (break out and return state)
-      ((eq? (statementType tree) 'return) (break (Mstate_return tree state)))
+      ((eq? (statementType tree) 'return) (break (Mstate_return tree state break)))
 
       ; otherwise return the tate
       (else state))))
 
 ; evaluating the value of an expression
 (define Mvalue
-  (lambda (expression state return)
+  (lambda (expression state return returnBreak)
     (cond
       ; if the expression is empty, value is null
       ((null? expression)                  (return 'NULL state))
@@ -81,74 +83,75 @@
                                                           (lambda (newState)
                                                             (Mvalue (rightOperand expression)
                                                                     newState
-                                                                    (lambda (val s) (return val s))))
-                                                          (lambda (v) v)))
+                                                                    (lambda (val s) (return val s)) returnBreak))
+                                                          returnBreak))
 
       ; if the epxression has a sub list and no identifying operator / statement type
       ((list? (car expression))            (Mvalue (car expression)
-                                                   (evaluateState (car expression) state (lambda (v) v) (lambda (v) v))
-                                                   (lambda (val state) (return val state))))
+                                                   (evaluateState (car expression) state (lambda (v) v) returnBreak)
+                                                   (lambda (val state) (return val state)) returnBreak))
 
       ; otherwise, perform calculations (need a different state being returned)
-      (else                                (compute expression state (lambda (val newState) (return val newState)))))))
+      (else                                (compute expression state (lambda (val newState) (return val newState)) returnBreak)))))
 
 
 ; variable declaration 
 (define Mstate_var
-  (lambda (expression state)
+  (lambda (expression state returnBreak)
     ; if there is a value with the variable
     (if (pair? (cddr expression))
         ; determine the value of the associated declaration, and add binding
-        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)))
+        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)) returnBreak)
         ; add binding with NULL value
         (addBinding (cadr expression) 'NULL state))))
      
 ; assignment
 (define Mstate_assign
- (lambda (expression state)
+ (lambda (expression state returnBreak)
    ; calculate the value of the assignment
    (Mvalue (rightOperand expression) state (lambda (value newState)
                                              ; account for side effects, and replace the binding 
-                                             (replaceBinding (leftOperand expression) value newState)))))
+                                             (replaceBinding (leftOperand expression) value newState)) returnBreak)))
 
 ; if-statements
 (define Mstate_cond
-  (lambda (expression state)
+  (lambda (expression state returnBreak)
     ; determine the boolean value of the condition
     (Mvalue (car expression) state (lambda (val newState)
                                      (if val
                                          ; if true, go through the if-statement
-                                         (evaluateState (cadr expression) newState (lambda (v) v) (lambda (v) v))
+                                         (evaluateState (cadr expression) newState (lambda (v) v) returnBreak)
                                          ; otherwise, check if there is an else condition
                                          (if (null? (cddr expression))
                                              ; if not, return state
                                              newState
                                              ; if there is, go through the else-statement
-                                             (evaluateState (caddr expression) newState (lambda (v) v) (lambda (v) v))))))))
+                                             (evaluateState (caddr expression) newState (lambda (v) v) returnBreak))))
+                                          returnBreak)))
 
 
 ; while-statements
 (define Mstate_while
-  (lambda (expression state)
+  (lambda (expression state returnBreak)
     ; determine if condition is true
     (Mvalue (car expression) state (lambda (val newState)
                                      (if val
                                          ; if true, determine the state of the body of the loop, and re-enter with the new state
-                                         (evaluateState (cdr expression) state (lambda (v) (Mstate_while expression v)) (lambda (v) v))
+                                         (evaluateState (cdr expression) newState (lambda (v) (Mstate_while expression v returnBreak)) returnBreak)
                                          ; otherwise, determine the value of 
-                                         (Mvalue (car expression) newState (lambda (val2 newState2) newState2)))))))
+                                         (Mvalue (car expression) newState (lambda (val2 newState2) newState2) returnBreak))) returnBreak)))
 
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
-  (lambda (expression state)
+  (lambda (expression state returnBreak)
     ; if 'return has already been assigned, do not re-assign
     (if (isDeclared 'return state)
         state
-        (Mvalue (cdr expression) state (lambda (value newState) (addBinding 'return value newState))))))
+        (Mvalue (cdr expression) state (lambda (value newState) (addBinding 'return value newState)) returnBreak))))
        
 ; calulates an expression (mathematical or boolean)
 (define compute
-  (lambda (expression state return)
+  (lambda (expression state return returnBreak)
     (cond
       
       ; not
@@ -158,7 +161,7 @@
                state
                (lambda (leftVal leftState)
                  ; return the 'not' of the value 
-                  (return (not leftVal) leftState))))
+                  (return (not leftVal) leftState)) returnBreak))
       
       ; addition
       ((eq? (statementType expression) '+)
@@ -173,7 +176,7 @@
                           
                            
                             ; return the sum of the two, and the new state 
-                            (return (+ leftVal rightVal) rightState))))))
+                            (return (+ leftVal rightVal) rightState)) returnBreak)) returnBreak))
       ; subtraction
       ((eq? (statementType expression) '-)
        ; determine the value of the left operand
@@ -188,7 +191,7 @@
                              leftState
                              (lambda (rightVal rightState)
                                ; return the difference of the two, and the new state 
-                               (return (- leftVal rightVal) rightState)))))))
+                               (return (- leftVal rightVal) rightState)) returnBreak))) returnBreak))
       ; multiplication
       ((eq? (statementType expression) '*)
        ; determine the value of the left operand
@@ -200,7 +203,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return the product of the two, and the new state 
-                           (return (* leftVal rightVal) rightState))))))
+                           (return (* leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; division
       ((eq? (statementType expression) '/)
@@ -213,7 +216,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return the quotient of the two, and the new state 
-                           (return (quotient leftVal rightVal) rightState))))))
+                           (return (quotient leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; modulo
       ((eq? (statementType expression) '%)
@@ -226,7 +229,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return the remainder of the two, and the new state 
-                           (return (remainder leftVal rightVal) rightState))))))
+                           (return (remainder leftVal rightVal) rightState)) returnBreak)) returnBreak))
       ; less than
       ((eq? (statementType expression) '<)
        (Mvalue (leftOperand expression)
@@ -237,7 +240,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal < rightVal, and the new state 
-                           (return (< leftVal rightVal) rightState))))))
+                           (return (< leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; greater than 
       ((eq? (statementType expression) '>)
@@ -250,7 +253,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal > rightVal, and the new state 
-                           (return (> leftVal rightVal) rightState))))))
+                           (return (> leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; less than or equal to 
       ((eq? (statementType expression) '<=)
@@ -262,7 +265,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal <= rightVal, and the new state 
-                           (return (<= leftVal rightVal) rightState))))))
+                           (return (<= leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; greater than or equal to
       ((eq? (statementType expression) '>=)
@@ -275,7 +278,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal >= rightVal, and the new state 
-                           (return (>= leftVal rightVal) rightState))))))
+                           (return (>= leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; equal
       ((eq? (statementType expression) '==)
@@ -291,7 +294,7 @@
                            (return (if (eq? leftVal rightVal) ; if statement converts 'true and 'false into #t / #f
                                        #t
                                        #f)
-                                       rightState))))))
+                                       rightState)) returnBreak)) returnBreak))
 
       ; not equal
       ((eq? (statementType expression) '!=)
@@ -304,7 +307,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal < rightVal, and the new state 
-                           (return (not (eq? leftVal rightVal)) rightState))))))
+                           (return (not (eq? leftVal rightVal)) rightState)) returnBreak)) returnBreak))
 
       ; or
       ((eq? (statementType expression) '||)
@@ -317,7 +320,7 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return leftVal || rightVal are true, and the new state 
-                           (return (or leftVal rightVal) rightState))))))
+                           (return (or leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ;and
       ((eq? (statementType expression) '&&)
@@ -330,10 +333,10 @@
                          leftState
                          (lambda (rightVal rightState)
                            ; return whether leftVal && rightVal are true , and the new state
-                           (return (and leftVal rightVal) rightState))))))
+                           (return (and leftVal rightVal) rightState)) returnBreak)) returnBreak))
 
       ; otherwise, determine the value of the car of the expression and return
-      (else (Mvalue (car expression) state (lambda (value newState) (return value newState))))
+      (else (Mvalue (car expression) state (lambda (value newState) (return value newState)) returnBreak))
       )))
 
  ;returns true if a variable has been declared already 
@@ -370,17 +373,19 @@
 ; adds a variable and value pair to the state
 (define addBinding
   (lambda (var value state)
-    ; if the variable has already been declared... 
-    (if (isDeclared var state)
+    ; if the variable has already been declared...
+    (cond
+      ;((eq? var 'return) (replaceLayer (getNumLayers state) (cons (cons var (varLis (getLayer (getNumLayers state) state))) (cons (cons value (valLis (getLayer (getNumLayers state) state))) '())) state))
+    ( (isDeclared var state)
         ; ... can't redeclare
-        (error "Variable has already been declared: " var)
+        (error "Variable has already been declared: " var))
         ; otherwise, replace the first layer of the state
-        (replaceLayer 0
+        (else (replaceLayer 0
                       ; add binding to the first layer of the state
                       (cons
                        (cons var (varLis (currentLayer state)))
                        (cons (cons value (valLis (currentLayer state))) '()))
-                      state))))
+                      state)))))
          
 ; replace an existing binding of a variable
 (define replaceBinding
@@ -443,6 +448,17 @@
       (else                  value))))
                              
 ; ------Abstractions--------------------
+
+; Add to the top layer
+(define getNumLayers
+  (lambda (state)
+    (getNumLayers-helper 0 state (lambda (v) v))))
+
+(define getNumLayers-helper
+  (lambda (currNum state return)
+    (if (null? (cdr state))
+        (return currNum)
+        (getNumLayers-helper (+ currNum 1) (cdr state) return))))
 
 ; Adds a layer to the state
 (define addLayer
