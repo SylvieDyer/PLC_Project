@@ -52,10 +52,10 @@
       ((eq? (statementType tree) '=)   (return (Mstate_assign tree state continue break throw returnBreak)))
  
       ; entering if statement
-      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state continue break throw returnBreak)))
+      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) (addLayer state) continue break throw returnBreak)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state continue (lambda (v) (call/cc (lambda (k) (k (return (removeLayer v)))))) throw returnBreak)))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) (addLayer state) continue (lambda (v) (call/cc (lambda (k) (k (return (removeLayer v)))))) throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
@@ -68,7 +68,7 @@
                                                                   ; check if there is only a finally & no catch
                                                                   ((eq? (caaddr tree) 'finally) (evaluateState (cadr (caddr tree)) (removeLayer newState) return continue break throw returnBreak))
                                                                   ; catch exist, does finally exist?                                                                                                
-                                                                  ((pair? (cdddr tree)) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
+                                                                  ((pair? (cdddr tree)) (println tree) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
                                                                   ; finally doesn't exist, so just return the newState
                                                                   (else (removeLayer newState)))) 
                                                               ; new continue to go to finally
@@ -93,15 +93,38 @@
                                                               ; new throw to throw errors sylvie makes
                                                               (lambda (newState)
                                                                 (if (eq? (caaddr tree) 'catch)
-                                                                    (evaluateState (caddr (caddr tree)) (removeLayer newState) return continue break throw returnBreak)
+                                                                    (evaluateState (caddr (caddr tree)) (removeLayer newState)
+                                                                                   (lambda (newState)
+                                                                                     (if (pair? (cdddr tree))
+                                                                                         (evaluateState (cdr (cadddr tree)) newState return continue break throw returnBreak) ; there is a Finally statement that must be completed
+                                                                                         (removeLayer newState)))
+                                                                                         continue break throw returnBreak)
                                                                     (print "No Catch stupid")))
                                                               returnBreak))
 
+      ; catch
+      ;((eq? (statementType tree) 'catch) (return (evaluateState (caddr tree) state
+       ;                                                 (lambda (newState)
+        ;                                                  (begin (println tree)
+         ;                                                 (return (evaluateState (cadr (cadr tree)) newState return continue break throw returnBreak))))
+          ;                                              (lambda (newState)
+           ;                                                (println "continue: new state" newState)
+            ;                                              (return (evaluateState (caddr tree) newState return continue break throw returnBreak)))
+             ;                                           (lambda (newState)
+              ;                                             (println "break: new state" newState)
+               ;                                           (return (evaluateState (caddr tree) newState return continue break throw returnBreak)))
+                ;                                        (lambda (newState)
+                 ;                                         (print "throwing!"))
+                  ;                                      returnBreak)))
+                                                                                 
+
+
+      
       ; saw a break statement
       ((eq? (statementType tree) 'break) (break state))
 
       ; saw a continue statement
-      ((eq? (statementType tree) 'continue) (continue state))
+      ((eq? (statementType tree) 'continue) (println "Just know you're stupid for using this :)")(continue state))
 
       ; saw a throw
       ((eq? (statementType tree) 'throw) (throw (replaceLayer (getNumLayers state) (cons (cons 'e (varLis (getLayer (getNumLayers state) state))) (cons (cons (cadr tree) (valLis (getLayer (getNumLayers state) state))) '())) state)) );(println (replaceLayer 0 (addBinding 'e (cadr tree) (getLayer 0 state)) state)) (throw (replaceLayer 0 (addBinding 'e (cadr tree) state) state)));(print ) (throw (addBinding 'e (cdr state) state))) ;(begin (print tree) (throw state)))
@@ -474,7 +497,7 @@
                                               (lambda (val)
                                                 ; if there are no more layers and nothing has been found, error
                                                 (if (and (null? (cdr state)) (eq? val -1))
-                                                     (error "Variable has not been declared yet: " name)
+                                                    (error "Variable has not been declared yet: " name)
                                                      ; otherwise recurse on the rest of the state
                                                      (findBindingByName name (cdr state))))
                                               break)))))
