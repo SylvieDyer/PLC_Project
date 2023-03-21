@@ -68,7 +68,7 @@
                                                                   ; check if there is only a finally & no catch
                                                                   ((eq? (caaddr tree) 'finally) (evaluateState (cadr (caddr tree)) (removeLayer newState) return continue break throw returnBreak))
                                                                   ; catch exist, does finally exist?                                                                                                
-                                                                  ((pair? (cdddr tree)) (println tree) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
+                                                                  ((pair? (cdddr tree)) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
                                                                   ; finally doesn't exist, so just return the newState
                                                                   (else (removeLayer newState)))) 
                                                               ; new continue to go to finally
@@ -124,7 +124,7 @@
       ((eq? (statementType tree) 'break) (break state))
 
       ; saw a continue statement
-      ((eq? (statementType tree) 'continue) (println "Just know you're stupid for using this :)")(continue state))
+      ((eq? (statementType tree) 'continue) (continue state))
 
       ; saw a throw
       ((eq? (statementType tree) 'throw) (throw (replaceLayer (getNumLayers state) (cons (cons 'e (varLis (getLayer (getNumLayers state) state))) (cons (cons (cadr tree) (valLis (getLayer (getNumLayers state) state))) '())) state)) );(println (replaceLayer 0 (addBinding 'e (cadr tree) (getLayer 0 state)) state)) (throw (replaceLayer 0 (addBinding 'e (cadr tree) state) state)));(print ) (throw (addBinding 'e (cdr state) state))) ;(begin (print tree) (throw state)))
@@ -239,19 +239,8 @@
                continue break throw returnBreak))
       
       ; addition
-      ((eq? (statementType expression) '+)
-       ; determine the value of the left operand
-        (Mvalue (leftOperand expression)
-                state
-                (lambda (leftVal leftState)
-                  ; determine the value of the right operand
-                  (Mvalue (rightOperand expression)
-                          leftState
-                          (lambda (rightVal rightState)
-                          
-                           
-                            ; return the sum of the two, and the new state 
-                            (return (+ leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '+) (performBinOp + expression state return continue break throw returnBreak))
+       
       ; subtraction
       ((eq? (statementType expression) '-)
        ; determine the value of the left operand
@@ -268,93 +257,26 @@
                                ; return the difference of the two, and the new state 
                                (return (- leftVal rightVal) rightState)) continue break throw returnBreak))) continue break throw returnBreak))
       ; multiplication
-      ((eq? (statementType expression) '*)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return the product of the two, and the new state 
-                           (return (* leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '*) (performBinOp * expression state return continue break throw returnBreak))
 
       ; division
-      ((eq? (statementType expression) '/)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return the quotient of the two, and the new state 
-                           (return (quotient leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '/) (performBinOp quotient expression state return continue break throw returnBreak))
 
       ; modulo
-      ((eq? (statementType expression) '%)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return the remainder of the two, and the new state 
-                           (return (remainder leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '%) (performBinOp remainder expression state return continue break throw returnBreak))
+      
       ; less than
-      ((eq? (statementType expression) '<)
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return whether leftVal < rightVal, and the new state 
-                           (return (< leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '<) (performBinOp < expression state return continue break throw returnBreak))
 
       ; greater than 
-      ((eq? (statementType expression) '>)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return whether leftVal > rightVal, and the new state 
-                           (return (> leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '>) (performBinOp > expression state return continue break throw returnBreak))
 
       ; less than or equal to 
-      ((eq? (statementType expression) '<=)
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return whether leftVal <= rightVal, and the new state 
-                           (return (<= leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '<=) (performBinOp <= expression state return continue break throw returnBreak))
 
       ; greater than or equal to
-      ((eq? (statementType expression) '>=)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return whether leftVal >= rightVal, and the new state 
-                           (return (>= leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
-
+      ((eq? (statementType expression) '>=) (performBinOp >= expression state return continue break throw returnBreak))
+      
       ; equal
       ((eq? (statementType expression) '==)
        ; determine the value of the left operand
@@ -610,3 +532,17 @@
 (define (atom? x)
   (and (not (null? x))
        (not (pair? x))))
+
+; perfom binary operations
+(define performBinOp
+  (lambda (op expression state return continue break throw returnBreak)
+    ; determine the value of the left operand
+    (Mvalue (leftOperand expression)
+            state
+            (lambda (leftVal leftState)
+              ; determine the value of the right operand
+              (Mvalue (rightOperand expression)
+                      leftState
+                      (lambda (rightVal rightState)
+                        ; return the sum of the two, and the new state
+                        (return (op leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak)))
