@@ -17,11 +17,7 @@
 (define interpretCode
   (lambda (tree)
     ; gets the return value
-    ;(call/cc (lambda (k) (evaluateState tree '((()())) (lambda (v) v) k)))));(lambda (v2) (findBindingByName 'return k))))) 
-    (findBindingByName 'return
-                       (call/cc 
-                        ; evaluates the state of the code, with a break-out method 
-                        (lambda (k) (evaluateState tree '((()())) (lambda (v) v) (lambda (v) v) (lambda (v) v) (lambda (v) v) k))))))
+    (parseValue (call/cc (lambda (k) (evaluateState tree '((() ())) (lambda (v) v) (lambda (v) v) (lambda (v) v) (lambda (v) v) k))))))
 
 ; determines the state of an expression 
 (define evaluateState
@@ -55,7 +51,7 @@
       ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state continue break throw returnBreak)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state continue (lambda (v) (call/cc (lambda (k) (k (return (removeLayer v)))))) throw returnBreak)))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state continue (lambda (v) (call/cc (lambda (k) (k (return v))))) throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
@@ -129,7 +125,7 @@
       ; saw a throw
       ((eq? (statementType tree) 'throw) (throw (replaceLayer (getNumLayers state) (cons (cons 'e (varLis (getLayer (getNumLayers state) state))) (cons (cons (cadr tree) (valLis (getLayer (getNumLayers state) state))) '())) state)) );(println (replaceLayer 0 (addBinding 'e (cadr tree) (getLayer 0 state)) state)) (throw (replaceLayer 0 (addBinding 'e (cadr tree) state) state)));(print ) (throw (addBinding 'e (cdr state) state))) ;(begin (print tree) (throw state)))
       ;((eq? (statementType tree) 'throw) (print (replaceLayer (getNumLayers state) (addBinding 'e 10 (getLayer (getNumLayers state) state)) state))) 
-      ; otherwise return the tate
+      ; otherwise return the state
       (else state))))
 
 ; evaluating the value of an expression
@@ -218,10 +214,8 @@
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state continue break throw returnBreak)
-    ; if 'return has already been assigned, do not re-assign
-    (if (isDeclared 'return state)
-        state
-        (Mvalue (cdr expression) state (lambda (value newState) (addBinding 'return value newState)) continue break throw returnBreak))))
+    ; evaluate & then return that value
+    (Mvalue (cdr expression) state (lambda (value newState) value) continue break throw returnBreak)))
        
 ; calulates an expression (mathematical or boolean)
 (define compute
