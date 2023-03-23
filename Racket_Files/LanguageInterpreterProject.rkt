@@ -6,7 +6,7 @@
 ;
 ;-------------------------------------------------------------------
 (require "simpleParser.rkt")
-(provide (all-defined-out))
+(provide (all-defined-out)) ; can remove this before submission *********
 
 ; interprets a file with code
 (define interpret
@@ -52,10 +52,10 @@
       ((eq? (statementType tree) '=)   (return (Mstate_assign tree state continue break throw returnBreak)))
  
       ; entering if statement
-      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) (addLayer state) continue break throw returnBreak)))
+      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state continue break throw returnBreak)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) (addLayer state) continue (lambda (v) (call/cc (lambda (k) (k (return (removeLayer v)))))) throw returnBreak)))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state continue (lambda (v) (call/cc (lambda (k) (k (return (removeLayer v)))))) throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
