@@ -51,7 +51,10 @@
       ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state continue break throw returnBreak)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state continue (lambda (v) (call/cc (lambda (k) (k (return v))))) throw returnBreak)))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state
+                                                               (lambda (newState) (evaluateState tree newState return continue break throw returnBreak))
+                                                               (lambda (newState) (return newState));(call/cc (lambda (k) (k (return newState)))))
+                                                               throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
