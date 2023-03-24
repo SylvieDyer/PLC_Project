@@ -14,12 +14,7 @@
                                          ("t20.txt" 12) ("t21.txt" 30) ("t22.txt" 11) ("t23.txt" 1106) ("t24.txt" 12) ("t25.txt" 16) ("t26.txt" 72)
                                          ("t27.txt" 21) ("t28.txt" 164)))
         (runTest-helper '( ("2t1.txt" 20) ("2t2.txt" 164) ("2t3.txt" 32) ("2t4.txt" 2) ("2t6.txt" 25) ("2t7.txt" 21) ("2t8.txt" 6) ("2t9.txt" -1)
-                                         ("2t10.txt" 789) ("2t15.txt" 125) ("2t16.txt" 110) 
-                                         ("2t18.txt" 101) ("2t20.txt" 21)
-
-                                         ("2t17.txt" 20004000)
-
-                                         )))))
+                                         ("2t10.txt" 789) ("2t15.txt" 125) ("2t16.txt" 110) ("2t17.txt" 20004000) ("2t18.txt" 101) ("2t20.txt" 21) )))))
 
 (define runTest-helper
   (lambda (tests)

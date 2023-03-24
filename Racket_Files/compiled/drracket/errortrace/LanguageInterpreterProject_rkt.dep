@@ -1,0 +1,1 @@
+("8.7" tarm64osx ("9598bebf8abec0b45bd8a536a01914b4a1f2280b" . "0b0e4018f70c98dd571f22956d3e3266b0d0ad08") #"/Users/urdeer/Desktop/plc/Language_Interpreter_Project/PLC_Project/Racket_Files/simpleParser.rkt" (collects #"drracket" #"private" #"drracket-errortrace-key.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))
