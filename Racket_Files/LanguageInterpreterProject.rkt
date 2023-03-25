@@ -22,14 +22,12 @@
 ; determines the state of an expression 
 (define evaluateState
   (lambda (tree state return continue break throw returnBreak)
- ; (println state) (println tree)
     (cond
       ; if the tree is empty or is a single value/variable
       ((null? tree) state)
       ((atom? tree) state)
       
       ((eq? (statementType tree) 'begin) (evaluateState (getBody tree) (addLayer state) (lambda (v) (return (removeLayer v))) (lambda (v) (continue (removeLayer v))) (lambda (v) (break (removeLayer v))) (lambda (e v) (throw e (removeLayer v))) returnBreak))
-      
 
       ; if there is a nested statement, evaluate the first statement, then the remainder
       ((list? (statementType tree)) (evaluateState (firstElement tree)
@@ -40,7 +38,6 @@
                                                    break
                                                    throw
                                                    returnBreak))
-
       
       ; --------------------------- otherwise, is some kind of statement --------------------------------
       
@@ -58,14 +55,13 @@
                                                                return
                                                                (lambda (newState) (return (evaluateState tree newState return continue break throw returnBreak)))
                                                                (lambda (newState) (return newState))
-                                                               ; (lambda (newState) newState));(call/cc (lambda (k) (k (return newState)))))
                                                                throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
 
       ; entering a try statement
-      ((eq? (statementType tree) 'try)    (evaluateState (cadr tree) (addLayer state)
+      ((eq? (statementType tree) 'try)    (evaluateState (getInnerBody tree) (addLayer state)
                                                          ; return (go to finally)
                                                          (lambda (newState)
                                                            (if (existFinally tree)
@@ -105,15 +101,15 @@
                                                                                                 (if (existFinally tree)
                                                                                                     (break (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
                                                                                                     (break  newState2)))
-                                                                                              ; new throw: finding an exception in catch block (run finally, then throw)
+                                                                                              ; new throw: finding an exception in catch block (run finally, then error (no catch))
                                                                                               (lambda (errorVal2 newState2)
-                                                                                                (addBinding (caar (cdaddr tree)) errorVal (addLayer newState))
+                                                                                                (addBinding (getErrorVarName tree) errorVal (addLayer newState))
                                                                                                 (if (existFinally tree)
-                                                                                                    (throw errorVal2 (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
+                                                                                                    (throw (error "Uncaught Error!") (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
                                                                                                     (throw (error "Uncaught Error!") newState2)))
                                                                                               ; found return
                                                                                               returnBreak))
-                                                               (print "No Catch stupid")))
+                                                               (print "Uncaught Error!")))
                                                          returnBreak))
       ; saw a break statement
       ((eq? (statementType tree) 'break) (break state))
@@ -123,8 +119,6 @@
 
       ; saw a throw
       ((eq? (statementType tree) 'throw) (throw (getErrorVal tree) (removeLayer state)))
-      ;(throw (replaceLayer (getNumLayers state) (cons (cons 'e (varLis (getLayer (getNumLayers state) state))) (cons (cons (cadr tree) (valLis (getLayer (getNumLayers state) state))) '())) state)) );(println (replaceLayer 0 (addBinding 'e (cadr tree) (getLayer 0 state)) state)) (throw (replaceLayer 0 (addBinding 'e (cadr tree) state) state)));(print ) (throw (addBinding 'e (cdr state) state))) ;(begin (print tree) (throw state)))
-      ;((eq? (statementType tree) 'throw) (print (replaceLayer (getNumLayers state) (addBinding 'e 10 (getLayer (getNumLayers state) state)) state)))
       
       ; otherwise return the state
       (else state))))
@@ -147,8 +141,6 @@
       ((symbol? expression)                (return (findBindingByName expression state)
                                                    state))
 
-     
-      
       ; if the expression is a assignment, re-compute value and update state
       ((eq? (statementType expression) '=) (evaluateState expression state
                                                           (lambda (newState)
@@ -159,8 +151,8 @@
                                                           returnBreak))
 
       ; if the epxression has a sub list and no identifying operator / statement type
-      ((list? (car expression))            (Mvalue (car expression)
-                                                   (evaluateState (car expression) state (lambda (v) v) continue break throw returnBreak)
+      ((list? (firstElement expression))            (Mvalue (firstElement expression)
+                                                   (evaluateState (firstElement expression) state (lambda (v) v) continue break throw returnBreak)
                                                    (lambda (val state) (return val state)) continue break throw returnBreak))
 
       ; otherwise, perform calculations (need a different state being returned)
@@ -171,11 +163,11 @@
 (define Mstate_var
   (lambda (expression state continue break throw returnBreak)
     ; if there is a value with the variable
-    (if (pair? (cddr expression))
+    (if (pair? (checkBody expression))
         ; determine the value of the associated declaration, and add binding
-        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)) continue break throw returnBreak)
+        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (leftOperand expression) value updatedState)) continue break throw returnBreak)
         ; add binding with NULL value
-        (addBinding (cadr expression) 'NULL state))))
+        (addBinding (leftOperand expression) 'NULL state))))
      
 ; assignment
 (define Mstate_assign
@@ -190,34 +182,32 @@
 (define Mstate_cond
   (lambda (expression state continue break throw returnBreak)
     ; determine the boolean value of the condition
-    (Mvalue (car expression) state (lambda (val newState)
-                                     (if val
-                                         ; if true, go through the if-statement
-                                         (evaluateState (cadr expression) newState (lambda (v) v) continue break throw returnBreak)
-                                         ; otherwise, check if there is an else condition
-                                         (if (null? (cddr expression))
-                                             ; if not, return state
-                                             newState
-                                             ; if there is, go through the else-statement
-                                             (evaluateState (caddr expression) newState (lambda (v) v) continue break throw returnBreak))))
+    (Mvalue (firstElement expression) state (lambda (val newState)
+                                              (cond
+                                                ((number? val)  (error "Invalid condition"))
+                                                 ; if true, go through the if-statement
+                                                (val          (evaluateState (getInnerBody expression) newState (lambda (v) v) continue break throw returnBreak))
+                                                ; if no else condition , return state
+                                                ((null? (checkBody expression))  newState)
+                                                ; if there is, go through else-statement
+                                                (else (evaluateState (caddr expression) newState (lambda (v) v) continue break throw returnBreak))))
             continue break throw returnBreak)))
 
 
 ; while-statements
 (define Mstate_while
   (lambda (expression state return continue break throw returnBreak)
-
-    ; (println expression)
     ; determine if condition is true
-    (Mvalue (car expression) state (lambda (val newState)
-                                     (if val
-                                         ; if true, determine the state of the body of the loop, and re-enter with the new state
-                                         (evaluateState (getBody expression) newState (lambda (v) (return (Mstate_while expression v return continue break throw returnBreak))) continue break throw returnBreak)
-                                         ; otherwise, side effects
-                                         (Mvalue (car expression) newState (lambda (val2 newState2) (return newState2)) continue break throw returnBreak)))
-            continue break throw returnBreak)))
-                                        ; (Mvalue (car expression) newState (lambda (val2 newState2) newState2) continue break throw returnBreak))) continue break throw returnBreak)))
-
+    (Mvalue (firstElement expression) state (lambda (val newState)
+                                              (cond
+                                                ; rejects non-booleans
+                                                ((number? val)    (error "Invalid condition"))
+                                                ; if true, determine the state of the body of the loop, and re-enter with the new state
+                                                (val            (evaluateState (getBody expression) newState (lambda (v) (return (Mstate_while expression v return continue break throw returnBreak))) continue break throw returnBreak))
+                                                ; otherwise, account for side effects
+                                                (else              (Mvalue (firstElement expression) newState (lambda (val2 newState2) (return newState2)) continue break throw returnBreak))))
+                                              continue break throw returnBreak)))
+                                       
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state continue break throw returnBreak)
@@ -228,7 +218,6 @@
 (define compute
   (lambda (expression state return continue break throw returnBreak)
     (cond
-      
       ; not
       ((eq? (statementType expression) '!)
        ; determine the value of the left, and only, operand
@@ -249,7 +238,7 @@
                state
                (lambda (leftVal leftState)
                  ; this checks if cddr doesn't exist, in which case this is a negative number
-                 (if (null? (cddr expression))
+                 (if (null? (checkBody expression))
                      (return (- 0 leftVal) leftState)
                      ; NOT dealing w a negative number, but rather subtraction - find value of right operand
                      (Mvalue (rightOperand expression)
@@ -279,20 +268,7 @@
       ((eq? (statementType expression) '>=) (performBinOp >= expression state return continue break throw returnBreak))
       
       ; equal
-      ((eq? (statementType expression) '==)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return if leftVal == rightVal
-                           (return (if (eq? leftVal rightVal) ; if statement converts 'true and 'false into #t / #f
-                                       #t
-                                       #f)
-                                       rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '==) (performBinOp eq? expression state return continue break throw returnBreak))
 
       ; not equal
       ((eq? (statementType expression) '!=)
@@ -308,7 +284,7 @@
                            (return (not (eq? leftVal rightVal)) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
       ; or
-      ((eq? (statementType expression) '||)
+      ((eq? (statementType expression) '||) 
        ; determine the value of the left operand
        (Mvalue (leftOperand expression)
                state
@@ -320,7 +296,7 @@
                            ; return leftVal || rightVal are true, and the new state 
                            (return (or leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
-      ;and
+      ; and
       ((eq? (statementType expression) '&&)
        ; determine the value of the left operand
        (Mvalue (leftOperand expression)
@@ -333,8 +309,10 @@
                            ; return whether leftVal && rightVal are true , and the new state
                            (return (and leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
-      ; otherwise, determine the value of the car of the expression and return
-      (else (Mvalue (car expression) state (lambda (value newState) (return value newState)) continue break throw returnBreak)))))
+      ; otherwise, determine the value of the first of the expression and return
+      (else (Mvalue (firstElement expression) state (lambda (value newState) (return value newState)) continue break throw returnBreak)))))
+
+; ---- helpers & abstractions -----
 
  ;returns true if a variable has been declared already 
 (define isDeclared
@@ -506,7 +484,7 @@
         (replaceLayer-helper layer (+ 1 currLayer) (cdr state) newLayer
                              ; and return the cons of the first part of the state with the result
                              (lambda (restOfState) (return (cons (car state) restOfState)))))))
-    
+
 ; returns the state's variables
 (define varLis
   (lambda (state)
@@ -565,6 +543,15 @@
                         ; return the sum of the two, and the new state
                         (return (op leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak)))
 
+; get try bdoy
+(define getInnerBody
+  (lambda (tree)
+    (cadr tree)))
+
+; gets secondary bodies
+(define checkBody
+  (lambda (tree)
+    (cddr tree)))
 
 ; check for finally body
 (define existFinally
