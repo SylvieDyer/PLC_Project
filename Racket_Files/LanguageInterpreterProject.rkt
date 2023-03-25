@@ -6,7 +6,6 @@
 ;
 ;-------------------------------------------------------------------
 (require "simpleParser.rkt")
-(provide (all-defined-out)) ; can remove this before submission *********
 
 ; interprets a file with code
 (define interpret
@@ -109,7 +108,7 @@
                                                                                                     (throw (error "Uncaught Error!") newState2)))
                                                                                               ; found return
                                                                                               returnBreak))
-                                                               (print "Uncaught Error!")))
+                                                               (error "Uncaught Error!")))
                                                          returnBreak))
       ; saw a break statement
       ((eq? (statementType tree) 'break) (break state))
@@ -203,7 +202,7 @@
                                                 ; rejects non-booleans
                                                 ((number? val)    (error "Invalid condition"))
                                                 ; if true, determine the state of the body of the loop, and re-enter with the new state
-                                                (val            (evaluateState (getBody expression) newState (lambda (v) (return (Mstate_while expression v return continue break throw returnBreak))) continue break throw returnBreak))
+                                                (val              (evaluateState (getBody expression) newState (lambda (v)  (return (Mstate_while expression v return continue break throw returnBreak))) continue break throw returnBreak));)
                                                 ; otherwise, account for side effects
                                                 (else              (Mvalue (firstElement expression) newState (lambda (val2 newState2) (return newState2)) continue break throw returnBreak))))
                                               continue break throw returnBreak)))
