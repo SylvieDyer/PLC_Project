@@ -6,7 +6,6 @@
 ;
 ;-------------------------------------------------------------------
 (require "simpleParser.rkt")
-(provide (all-defined-out)) ; can remove this before submission *********
 
 ; interprets a file with code
 (define interpret
@@ -17,7 +16,7 @@
 (define interpretCode
   (lambda (tree)
     ; gets the return value
-    (parseValue (call/cc (lambda (k) (evaluateState tree '((() ())) (lambda (v) v) (lambda (v) v) (lambda (v) v) (lambda (v) v) k))))))
+    (parseValue (call/cc (lambda (k) (evaluateState tree (makeState) (lambda (v) v) (lambda (v) v) (lambda (v) (error "Cannot break here")) (lambda (e v) v) k))))))
 
 ; determines the state of an expression 
 (define evaluateState
@@ -26,103 +25,91 @@
       ; if the tree is empty or is a single value/variable
       ((null? tree) state)
       ((atom? tree) state)
+      
+      ((eq? (statementType tree) 'begin) (evaluateState (getBody tree) (addLayer state) (lambda (v) (return (removeLayer v))) (lambda (v) (continue (removeLayer v))) (lambda (v) (break (removeLayer v))) (lambda (e v) (throw e (removeLayer v))) returnBreak))
 
       ; if there is a nested statement, evaluate the first statement, then the remainder
-      ((list? (statementType tree)) (evaluateState (car tree)
+      ((list? (statementType tree)) (evaluateState (firstElement tree)
                                                    state
                                                    (lambda (newState)
-                                                     (return (evaluateState (cdr tree) newState (lambda (v) v) continue break throw returnBreak)))
+                                                     (return (evaluateState (otherElements tree) newState (lambda (v) v) continue break throw returnBreak)))
                                                    continue
                                                    break
                                                    throw
                                                    returnBreak))
-
-      ((eq? (statementType tree) 'begin) (evaluateState (cdr tree) (addLayer state) (lambda (newState) (return (removeLayer newState))) continue break throw returnBreak))
       
       ; --------------------------- otherwise, is some kind of statement --------------------------------
       
       ; declaring variable
-      ((eq? (statementType tree) 'var) (return (Mstate_var tree state continue break throw returnBreak)))
+      ((eq? (statementType tree) 'var)   (return (Mstate_var tree state continue break throw returnBreak)))
       
       ; assigning variable
-      ((eq? (statementType tree) '=)   (return (Mstate_assign tree state continue break throw returnBreak)))
+      ((eq? (statementType tree) '=)     (return (Mstate_assign tree state continue break throw returnBreak)))
  
       ; entering if statement
-      ((eq? (statementType tree) 'if)  (return (Mstate_cond (cdr tree) state continue break throw returnBreak)))
+      ((eq? (statementType tree) 'if)    (return (Mstate_cond (getBody tree) state continue break throw returnBreak)))
 
       ; entering while statement
-      ((eq? (statementType tree) 'while) (return (Mstate_while (cdr tree) state
-                                                               (lambda (newState) (evaluateState tree newState return continue break throw returnBreak))
-                                                               (lambda (newState) (return newState));(call/cc (lambda (k) (k (return newState)))))
+      ((eq? (statementType tree) 'while) (return (Mstate_while (getBody tree) state
+                                                               return
+                                                               (lambda (newState) (return (evaluateState tree newState return continue break throw returnBreak)))
+                                                               (lambda (newState) (return newState))
                                                                throw returnBreak)))
 
       ; entering return statement (break out and return state)
       ((eq? (statementType tree) 'return) (returnBreak (Mstate_return tree state continue break throw returnBreak)))
 
       ; entering a try statement
-      ((eq? (statementType tree) 'try) (evaluateState (cadr tree) (addLayer state)
-                                                              ; return to go to finally
-                                                              (lambda (newState)
-                                                                (if (pair? (cadddr tree))
-                                                                    (return (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
-                                                                    (return (removeLayer newState))))
-                                                                ;(cond
-                                                                  ; check if there is only a finally & no catch
-                                                                 ; ((eq? (caaddr tree) 'finally) (evaluateState (cadr (caddr tree)) (removeLayer newState) return continue break throw returnBreak))
-                                                                  ; catch exist, does finally exist?                                                                                                
-                                                                  ;((pair? (cdddr tree)) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
-                                                                  ; finally doesn't exist, so just return the newState
-                                                                  ;(else (removeLayer newState)))) 
-                                                              ; new continue to go to finally
-                                                              (lambda (newState)
-                                                                (cond
-                                                                  ; check if there is only a finally & no catch
-                                                                  ((eq? (caaddr tree) 'finally) (evaluateState (cadr (caddr tree)) (removeLayer newState)return continue break throw returnBreak))
-                                                                  ; catch exist, does finally exist?                                                                                                
-                                                                  ((pair? (cadddr tree)) (evaluateState (cadr (cadddr tree)) (removeLayer newState) return continue break throw returnBreak))
-                                                                  ; finally doesn't exist, so just return the newState
-                                                                  (else (removeLayer newState)))) 
-                                                              ; new break to execute finally statement
-                                                              break
-                                                      ;        (lambda (newState)
-                                                      ;          (cond
-                                                      ;            ; check if there is only a finally & no catch
-                                                      ;            ((eq? (caaddr tree) 'finally) (evaluateState (caddr tree) (removeLayer newState) continue break throw returnBreak))
-                                                      ;            ; catch exist, does finally exist?                                                                                                
-                                                      ;            ((pair? (cdddr tree)) (evaluateState (caddr tree) (removeLayer newState) continue break throw returnBreak))
-                                                      ;            ; finally doesn't exist, so just return the newState
-                                                      ;            (else (removeLayer newState)))) 
-                                                              ; this throw to throw errors sylvie makes
-                                                              (lambda (errorVal newState)
-                                                                (if (eq? (caaddr tree) 'catch)
-                                                                    (evaluateState (caddr (caddr tree))
-                                                                                   (addBinding (caar (cdaddr tree)) errorVal (addLayer newState)) ;(removeLayer newState)
-                                                                                   (lambda (newState2)
-                                                                                     (if (pair? (cadddr tree))
-                                                                                         (evaluateState (cdr (cadddr tree)) (addLayer newState2) return continue break throw returnBreak) ; there is a Finally statement that must be completed
-                                                                                         (removeLayer newState2)))
-                                                                                         continue break throw returnBreak)
-                                                                    (print "No Catch stupid")))
-                                                              returnBreak))
-
-      ; catch
-      ;((eq? (statementType tree) 'catch) (return (evaluateState (caddr tree) state
-       ;                                                 (lambda (newState)
-        ;                                                  (begin (println tree)
-         ;                                                 (return (evaluateState (cadr (cadr tree)) newState return continue break throw returnBreak))))
-          ;                                              (lambda (newState)
-           ;                                                (println "continue: new state" newState)
-            ;                                              (return (evaluateState (caddr tree) newState return continue break throw returnBreak)))
-             ;                                           (lambda (newState)
-              ;                                             (println "break: new state" newState)
-               ;                                           (return (evaluateState (caddr tree) newState return continue break throw returnBreak)))
-                ;                                        (lambda (newState)
-                 ;                                         (print "throwing!"))
-                  ;                                      returnBreak)))
-                                                                                 
-
-
-      
+      ((eq? (statementType tree) 'try)    (evaluateState (getInnerBody tree) (addLayer state)
+                                                         ; return (go to finally)
+                                                         (lambda (newState)
+                                                           (if (existFinally tree)
+                                                               (return (evaluateState (getFinally tree) (addLayer (removeLayer newState)) return continue break throw returnBreak))
+                                                               (return (removeLayer newState))))
+                                                    
+                                                         ; new continue (go to finally)
+                                                         (lambda (newState)
+                                                           (if (existFinally tree)
+                                                               (continue (evaluateState (getFinally tree) (addLayer (removeLayer newState)) return continue break throw returnBreak))
+                                                               (continue (removeLayer newState))))
+                                                              
+                                                         ; new break (execute finally statement)
+                                                         (lambda (newState)
+                                                           (if (existFinally tree)
+                                                               (break (evaluateState (getFinally tree) (addLayer (removeLayer newState)) return continue break throw returnBreak))
+                                                               (break newState)))
+                                                              
+                                                         ; this throw to throw errors sylvie makes
+                                                         (lambda (errorVal newState)
+                                                           (if (existCatch tree)
+                                                               (throw errorVal (evaluateState (getCatch tree)
+                                                                                              ; state including error value
+                                                                                              (addBinding (getErrorVarName tree) errorVal (addLayer newState))
+                                                                                              ; new return - go to finally first (if exists)
+                                                                                              (lambda (newState2)
+                                                                                                (if (existFinally tree)
+                                                                                                    (return (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak)) ; there is a Finally statement that must be completed
+                                                                                                    (return (removeLayer newState2))))
+                                                                                              ; new continue - go to finally first (if exists)
+                                                                                              (lambda (newState2)
+                                                                                                (if (existFinally tree)
+                                                                                                    (continue (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
+                                                                                                    (continue (removeLayer newState2))))
+                                                                                              ; new break - go to finally first (if exists)
+                                                                                              (lambda (newState2)
+                                                                                                (if (existFinally tree)
+                                                                                                    (break (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
+                                                                                                    (break  newState2)))
+                                                                                              ; new throw: finding an exception in catch block (run finally, then error (no catch))
+                                                                                              (lambda (errorVal2 newState2)
+                                                                                                (addBinding (getErrorVarName tree) errorVal (addLayer newState))
+                                                                                                (if (existFinally tree)
+                                                                                                    (throw (error "Uncaught Error!") (evaluateState (getFinally tree) (addLayer (removeLayer newState2)) return continue break throw returnBreak))
+                                                                                                    (throw (error "Uncaught Error!") newState2)))
+                                                                                              ; found return
+                                                                                              returnBreak))
+                                                               (error "Uncaught Error!")))
+                                                         returnBreak))
       ; saw a break statement
       ((eq? (statementType tree) 'break) (break state))
 
@@ -130,8 +117,8 @@
       ((eq? (statementType tree) 'continue) (continue state))
 
       ; saw a throw
-      ((eq? (statementType tree) 'throw) (throw (cadr tree) (removeLayer state)));(throw (replaceLayer (getNumLayers state) (cons (cons 'e (varLis (getLayer (getNumLayers state) state))) (cons (cons (cadr tree) (valLis (getLayer (getNumLayers state) state))) '())) state)) );(println (replaceLayer 0 (addBinding 'e (cadr tree) (getLayer 0 state)) state)) (throw (replaceLayer 0 (addBinding 'e (cadr tree) state) state)));(print ) (throw (addBinding 'e (cdr state) state))) ;(begin (print tree) (throw state)))
-      ;((eq? (statementType tree) 'throw) (print (replaceLayer (getNumLayers state) (addBinding 'e 10 (getLayer (getNumLayers state) state)) state))) 
+      ((eq? (statementType tree) 'throw) (throw (getErrorVal tree) (removeLayer state)))
+      
       ; otherwise return the state
       (else state))))
 
@@ -148,11 +135,11 @@
       ; if the variable is true or false
       ((eq? expression 'false)             (return #f state))
       ((eq? expression 'true)              (return #t state))
-      
+ 
       ; if the expression is a variable, return its value 
       ((symbol? expression)                (return (findBindingByName expression state)
                                                    state))
-      
+
       ; if the expression is a assignment, re-compute value and update state
       ((eq? (statementType expression) '=) (evaluateState expression state
                                                           (lambda (newState)
@@ -163,8 +150,8 @@
                                                           returnBreak))
 
       ; if the epxression has a sub list and no identifying operator / statement type
-      ((list? (car expression))            (Mvalue (car expression)
-                                                   (evaluateState (car expression) state (lambda (v) v) continue break throw returnBreak)
+      ((list? (firstElement expression))            (Mvalue (firstElement expression)
+                                                   (evaluateState (firstElement expression) state (lambda (v) v) continue break throw returnBreak)
                                                    (lambda (val state) (return val state)) continue break throw returnBreak))
 
       ; otherwise, perform calculations (need a different state being returned)
@@ -175,11 +162,11 @@
 (define Mstate_var
   (lambda (expression state continue break throw returnBreak)
     ; if there is a value with the variable
-    (if (pair? (cddr expression))
+    (if (pair? (checkBody expression))
         ; determine the value of the associated declaration, and add binding
-        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (cadr expression) value updatedState)) continue break throw returnBreak)
+        (Mvalue (rightOperand expression) state (lambda (value updatedState) (addBinding (leftOperand expression) value updatedState)) continue break throw returnBreak)
         ; add binding with NULL value
-        (addBinding (cadr expression) 'NULL state))))
+        (addBinding (leftOperand expression) 'NULL state))))
      
 ; assignment
 (define Mstate_assign
@@ -194,41 +181,42 @@
 (define Mstate_cond
   (lambda (expression state continue break throw returnBreak)
     ; determine the boolean value of the condition
-    (Mvalue (car expression) state (lambda (val newState)
-                                     (if val
-                                         ; if true, go through the if-statement
-                                         (evaluateState (cadr expression) newState (lambda (v) v) continue break throw returnBreak)
-                                         ; otherwise, check if there is an else condition
-                                         (if (null? (cddr expression))
-                                             ; if not, return state
-                                             newState
-                                             ; if there is, go through the else-statement
-                                             (evaluateState (caddr expression) newState (lambda (v) v) continue break throw returnBreak))))
-                                          continue break throw returnBreak)))
+    (Mvalue (firstElement expression) state (lambda (val newState)
+                                              (cond
+                                                ((number? val)  (error "Invalid condition"))
+                                                 ; if true, go through the if-statement
+                                                (val          (evaluateState (getInnerBody expression) newState (lambda (v) v) continue break throw returnBreak))
+                                                ; if no else condition , return state
+                                                ((null? (checkBody expression))  newState)
+                                                ; if there is, go through else-statement
+                                                (else (evaluateState (caddr expression) newState (lambda (v) v) continue break throw returnBreak))))
+            continue break throw returnBreak)))
 
 
 ; while-statements
 (define Mstate_while
-  (lambda (expression state continue break throw returnBreak)
+  (lambda (expression state return continue break throw returnBreak)
     ; determine if condition is true
-    (Mvalue (car expression) state (lambda (val newState)
-                                     (if val
-                                         ; if true, determine the state of the body of the loop, and re-enter with the new state
-                                         (evaluateState (cdr expression) newState (lambda (v) (Mstate_while expression v continue break throw returnBreak)) continue break throw returnBreak)
-                                         ; otherwise, determine the value of 
-                                         (Mvalue (car expression) newState (lambda (val2 newState2) newState2) continue break throw returnBreak))) continue break throw returnBreak)))
-
+    (Mvalue (firstElement expression) state (lambda (val newState)
+                                              (cond
+                                                ; rejects non-booleans
+                                                ((number? val)    (error "Invalid condition"))
+                                                ; if true, determine the state of the body of the loop, and re-enter with the new state
+                                                (val              (evaluateState (getBody expression) newState (lambda (v)  (return (Mstate_while expression v return continue break throw returnBreak))) continue break throw returnBreak));)
+                                                ; otherwise, account for side effects
+                                                (else              (Mvalue (firstElement expression) newState (lambda (val2 newState2) (return newState2)) continue break throw returnBreak))))
+                                              continue break throw returnBreak)))
+                                       
 ; return statement (adds binding to a special variable "return") 
 (define Mstate_return
   (lambda (expression state continue break throw returnBreak)
     ; evaluate & then return that value
-    (Mvalue (cdr expression) state (lambda (value newState) value) continue break throw returnBreak)))
+    (Mvalue (getBody expression) state (lambda (value newState) value) continue break throw returnBreak)))
        
 ; calulates an expression (mathematical or boolean)
 (define compute
   (lambda (expression state return continue break throw returnBreak)
     (cond
-      
       ; not
       ((eq? (statementType expression) '!)
        ; determine the value of the left, and only, operand
@@ -249,7 +237,7 @@
                state
                (lambda (leftVal leftState)
                  ; this checks if cddr doesn't exist, in which case this is a negative number
-                 (if (null? (cddr expression))
+                 (if (null? (checkBody expression))
                      (return (- 0 leftVal) leftState)
                      ; NOT dealing w a negative number, but rather subtraction - find value of right operand
                      (Mvalue (rightOperand expression)
@@ -279,20 +267,7 @@
       ((eq? (statementType expression) '>=) (performBinOp >= expression state return continue break throw returnBreak))
       
       ; equal
-      ((eq? (statementType expression) '==)
-       ; determine the value of the left operand
-       (Mvalue (leftOperand expression)
-               state
-               (lambda (leftVal leftState)
-                 ; determine the value of the right operand
-                 (Mvalue (rightOperand expression)
-                         leftState
-                         (lambda (rightVal rightState)
-                           ; return if leftVal == rightVal
-                           (return (if (eq? leftVal rightVal) ; if statement converts 'true and 'false into #t / #f
-                                       #t
-                                       #f)
-                                       rightState)) continue break throw returnBreak)) continue break throw returnBreak))
+      ((eq? (statementType expression) '==) (performBinOp eq? expression state return continue break throw returnBreak))
 
       ; not equal
       ((eq? (statementType expression) '!=)
@@ -308,7 +283,7 @@
                            (return (not (eq? leftVal rightVal)) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
       ; or
-      ((eq? (statementType expression) '||)
+      ((eq? (statementType expression) '||) 
        ; determine the value of the left operand
        (Mvalue (leftOperand expression)
                state
@@ -320,7 +295,7 @@
                            ; return leftVal || rightVal are true, and the new state 
                            (return (or leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
-      ;and
+      ; and
       ((eq? (statementType expression) '&&)
        ; determine the value of the left operand
        (Mvalue (leftOperand expression)
@@ -333,9 +308,10 @@
                            ; return whether leftVal && rightVal are true , and the new state
                            (return (and leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak))
 
-      ; otherwise, determine the value of the car of the expression and return
-      (else (Mvalue (car expression) state (lambda (value newState) (return value newState)) continue break throw returnBreak))
-      )))
+      ; otherwise, determine the value of the first of the expression and return
+      (else (Mvalue (firstElement expression) state (lambda (value newState) (return value newState)) continue break throw returnBreak)))))
+
+; ---- helpers & abstractions -----
 
  ;returns true if a variable has been declared already 
 (define isDeclared
@@ -432,7 +408,7 @@
       ; if either list is empty, variable has not been declared- throw error 
       ((or (null? varLis) (null? valLis)) (return -1))
       ; if the name is found, return coresponding value
-      ((eq? name (car varLis)) (break (parseValue (car valLis))))
+      ((eq? name (car varLis)) (break (car valLis)))
       ; otherwise keep searching
       (else                    (findBindingByName-helper name (cdr varLis) (cdr valLis) return break)))))
 
@@ -446,6 +422,11 @@
       (else                  value))))
                              
 ; ------Abstractions--------------------
+
+; make the state
+(define makeState
+  (lambda ()
+    '((() ()))))
 
 ; Add to the top layer
 (define getNumLayers
@@ -502,8 +483,7 @@
         (replaceLayer-helper layer (+ 1 currLayer) (cdr state) newLayer
                              ; and return the cons of the first part of the state with the result
                              (lambda (restOfState) (return (cons (car state) restOfState)))))))
-    
-    
+
 ; returns the state's variables
 (define varLis
   (lambda (state)
@@ -514,10 +494,24 @@
   (lambda (state)
     (cadr state)))
 
+; returns the first part of list
+(define firstElement
+  (lambda (lis)
+    (car lis)))
+; returns the rest of a list
+(define otherElements
+  (lambda (lis)
+    (cdr lis)))
+
 ; returns the statement type 
 (define statementType
   (lambda (expression)
     (car expression)))
+
+; returns the body of a statement
+(define getBody
+  (lambda (expression)
+    (cdr expression)))
 
 ; right operand (pre-fix form)
 (define rightOperand
@@ -547,3 +541,43 @@
                       (lambda (rightVal rightState)
                         ; return the sum of the two, and the new state
                         (return (op leftVal rightVal) rightState)) continue break throw returnBreak)) continue break throw returnBreak)))
+
+; get try bdoy
+(define getInnerBody
+  (lambda (tree)
+    (cadr tree)))
+
+; gets secondary bodies
+(define checkBody
+  (lambda (tree)
+    (cddr tree)))
+
+; check for finally body
+(define existFinally
+  (lambda (tree)
+    (pair? (cadddr tree))))
+
+; check for catch body
+(define existCatch
+  (lambda (tree)
+    (eq? (caaddr tree) 'catch)))
+
+; get finally body
+(define getFinally
+  (lambda (tree)
+    (cadr (cadddr tree))))
+
+; get catch body
+(define getCatch
+  (lambda (tree)
+    (caddr (caddr tree))))
+
+; error variable name
+(define getErrorVarName
+  (lambda (tree)
+    (caar (cdaddr tree))))
+
+; error variable value
+(define getErrorVal
+  (lambda (tree)
+    (cadr tree)))
