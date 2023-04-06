@@ -9,7 +9,9 @@
   (lambda (v)
     ;(let ([tests '("t1.txt" "t2.txt" "t3.txt" "t4.txt" "t5.txt")])
 
-    (runTest-helper '( ("3t1.txt" 10) ("3t2.txt" 14) ("3t3.txt" 45) ("3t4.txt" 55) ("3t5.txt" 1) ("3t6.txt" 115) ("3t7.txt" true) ("3t8.txt" 20) ("3t9.txt" 24)
+    (runTest-helper '( ("3t1.txt" 10) ("3t2.txt" 14) ("3t3.txt" 45)
+                                      ("3t4.txt" 55)
+                                      ("3t5.txt" 1) ("3t6.txt" 115) ("3t7.txt" true) ("3t8.txt" 20) ("3t9.txt" 24)
                                         ("3t10.txt" 2) ("3t11.txt" 35) ("3t13.txt" 90) ("3t14.txt" 69) ("3t15.txt" 87) ("3t16.txt" 64) ("3t18.txt" 125)
                                         ("3t19.txt" 100) ("3t20.txt" 2000400) ("3t21.txt" 3421) ("3t22.txt" 20332) ("3t23.txt" 21)))
 ;    (if (eq? v 1)

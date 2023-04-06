@@ -27,10 +27,9 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment return break continue throw next)
-   ; (println "Entering Interpret")
-    ;(println environment)
-  ;; (println statement)
-  
+  ;  (println "interpret statement")
+   ; (println environment)
+   ; (println statement)
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) environment return break continue throw next))
@@ -47,20 +46,13 @@
       ((eq? 'throw (statement-type statement))    (interpret-throw statement environment throw))
       ((eq? 'try (statement-type statement))      (interpret-try statement environment return break continue throw next))
       (else (myerror "Unknown statement:"         (statement-type statement))))
-   ; (println "leaving interpret")
-   ; (println environment)
     ))
 
 ; Calls the function continuation
 (define interpret-function
   (lambda (statement environment next)
-
-    (next(insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))
-      ; check if its the main method
-    (if (eq? (get-function-name statement) 'main)
-        ; if it is, run it:
-        (interpret-function-call statement environment)
-        '())
+    ; continue on, after binding the closure to the function's name 
+    (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))
     ))
 
 ; to make the closure
@@ -68,22 +60,38 @@
   (lambda (formal-params body environment)
     (cons formal-params (cons body (cons environment '())))))
 
-
 ; to handel when a function was called
 (define interpret-function-call
   (lambda (statement environment)
-    ; chack if the function has been declared
-    (if (exists? (get-function-name statement))
+   ; (println "INTERPETING FUNCTION CALL")
+    ;(println environment)
+    ; check if the function has been declared
+    (if (exists? (get-function-name statement) environment)
         ; get the closure
-          (let ([closure (lookup (get-function-name statement))])
-            (println (get-closure-body closure))
-            (println (get-closure-state closure))
-            (println (get-closure-params closure))
-            (interpret-statement-list (get-closure-body closure) (get-closure-state closure) (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))
+          (let ([closure (lookup (get-function-name statement) environment)])
+        ;    (println "closure")
+          ;  (println closure)
+            ; run the body of the function 
+            (interpret-statement-list (get-closure-body closure)
+                                      ; new state with formal/actual parameters added to the NEW state, with the closure in it
+                                      (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
+                                      (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
+                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))
       
         (myerror "Function undefined:" (get-function-name statement)))))
                 
+
+; binding formal and actual parameters into a frame and returning that frame
+(define bind-parameters
+  (lambda (formal actual environment)
+    (bind-parameters-helper formal actual (newenvironment) environment)))
+
+(define bind-parameters-helper
+  (lambda (formal actual frame environment)
+    (cond
+      ((null? formal)   frame)
+      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment) ))))
+
 
 
 ; Calls the return continuation with the given expression value
@@ -180,7 +188,7 @@
       ((not (eq? (statement-type finally-statement) 'finally)) (myerror "Incorrectly formatted finally block"))
       (else (cons 'begin (cadr finally-statement))))))
 
-; Evaluates all possible boolean and arithmetic expressions, including constants and variables.
+; Evaluates all possible boolean and arithmetic expressions, including constants, variables, and function calls
 (define eval-expression
   (lambda (expr environment)
     (cond
@@ -188,6 +196,7 @@
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
       ((not (list? expr)) (lookup expr environment))
+      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment))
       (else (eval-operator expr environment)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
@@ -301,6 +310,11 @@
 (define pop-frame
   (lambda (environment)
     (cdr environment)))
+
+; add a frame onto the top of the environment
+(define add-frame
+  (lambda (new-frame environment)
+    (cons (topframe new-frame) environment)))
 
 ; some abstractions
 (define topframe car)
