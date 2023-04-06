@@ -32,7 +32,7 @@
    ; (println statement)
     (cond
       ; if at main function, want to run automatically
-      ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) environment return break continue throw next))
+      ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
       ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
