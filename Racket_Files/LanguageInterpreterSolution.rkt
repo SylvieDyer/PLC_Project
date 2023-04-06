@@ -1,6 +1,7 @@
 ; If you are using scheme instead of racket, comment these two lines, uncomment the (load "simpleParser.scm") and comment the (require "simpleParser.rkt")
 #lang racket
 (require "functionParser.rkt")
+(provide (all-defined-out))
 ; (load "simpleParser.scm")
 
 ; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
@@ -28,8 +29,8 @@
   (lambda (statement environment return break continue throw next)
    ; (println "Entering Interpret")
     ;(println environment)
-   (println statement)
-    (println( main-body statement))
+  ;; (println statement)
+  
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) environment return break continue throw next))
@@ -93,7 +94,7 @@
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
 (define interpret-declare
   (lambda (statement environment next)
-    (println statement)
+   ; (println statement)
     (if (exists-declare-value? statement)
         (next (insert (get-declare-var statement) (eval-expression (get-declare-value statement) environment) environment))
         (next (insert (get-declare-var statement) 'novalue environment)))))
