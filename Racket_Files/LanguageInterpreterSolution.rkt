@@ -26,10 +26,15 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment return break continue throw next)
-  ;  (println environment)
-  ;  (println statement)
+   ; (println "Entering Interpret")
+    ;(println environment)
+   (println statement)
+    (println( main-body statement))
     (cond
-      ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment return))
+      ; if at main function, want to run automatically
+      ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) environment return break continue throw next))
+      ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
+      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
       ((eq? '= (statement-type statement))        (interpret-assign statement environment next))
@@ -40,20 +45,44 @@
       ((eq? 'begin (statement-type statement))    (interpret-block statement environment return break continue throw next))
       ((eq? 'throw (statement-type statement))    (interpret-throw statement environment throw))
       ((eq? 'try (statement-type statement))      (interpret-try statement environment return break continue throw next))
-      (else (myerror "Unknown statement:"         (statement-type statement))))))
+      (else (myerror "Unknown statement:"         (statement-type statement))))
+   ; (println "leaving interpret")
+   ; (println environment)
+    ))
 
 ; Calls the function continuation
-;(define interpret-function
-;  (lambda (statement environment return)
-;    (println statement)
-;    (add-to-frame (statement-type statement) (caddr statement) environment)
-;    (interpret-statement-list (caddr statement)
-;                              (push-frame environment)
-;                              (lambda (v) (add-to-frame (statement-type statement) v environment))
-;                              (lambda (env) (myerror "Break used outside of loop"))
-;                              (lambda (env) (myerror "Continue used outside of loop"))
-;                              (lambda (v env) (myerror "Uncaught exception thrown"))
-;                              (lambda (env) env))))
+(define interpret-function
+  (lambda (statement environment next)
+
+    (next(insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))
+      ; check if its the main method
+    (if (eq? (get-function-name statement) 'main)
+        ; if it is, run it:
+        (interpret-function-call statement environment)
+        '())
+    ))
+
+; to make the closure
+(define make-closure
+  (lambda (formal-params body environment)
+    (cons formal-params (cons body (cons environment '())))))
+
+
+; to handel when a function was called
+(define interpret-function-call
+  (lambda (statement environment)
+    ; chack if the function has been declared
+    (if (exists? (get-function-name statement))
+        ; get the closure
+          (let ([closure (lookup (get-function-name statement))])
+            (println (get-closure-body closure))
+            (println (get-closure-state closure))
+            (println (get-closure-params closure))
+            (interpret-statement-list (get-closure-body closure) (get-closure-state closure) (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
+                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))
+      
+        (myerror "Function undefined:" (get-function-name statement)))))
+                
 
 
 ; Calls the return continuation with the given expression value
@@ -206,6 +235,7 @@
 (define operand1 cadr)
 (define operand2 caddr)
 (define operand3 cadddr)
+(define main-body cadddr)
 
 (define exists-operand2?
   (lambda (statement)
@@ -231,6 +261,16 @@
 (define get-try operand1)
 (define get-catch operand2)
 (define get-finally operand3)
+
+(define main-func? operand1)
+
+(define get-function-name operator)
+(define get-function-params operand1)
+(define get-function-body operand2)
+
+(define get-closure-params operator)
+(define get-closure-body operand1)
+(define get-closure-state operand2)
 
 (define catch-var
   (lambda (catch-statement)
