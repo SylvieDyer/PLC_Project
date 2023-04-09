@@ -74,7 +74,8 @@
           (let ([closure (lookup (get-function-name statement) environment)])
         ;    (println "closure")
           ;  (println closure)
-            ; run the body of the function 
+            ; run the body of the function
+            ; issue here. Needs to return environment in case of return not used??
             (interpret-statement-list (get-closure-body closure)
                                       ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                       (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
