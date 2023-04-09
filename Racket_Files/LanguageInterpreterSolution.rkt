@@ -22,7 +22,7 @@
   (lambda (statement-list environment return break continue throw next)
     (if (null? statement-list)
         (next environment)
-        (interpret-statement (car statement-list) environment return break continue throw (lambda (env) (print "HERE NEXT") (interpret-statement-list (cdr statement-list) env return break continue throw next))))))
+        (interpret-statement (car statement-list) environment return break continue throw (lambda (env) (interpret-statement-list (cdr statement-list) env return break continue throw next))))))
 
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
@@ -37,7 +37,8 @@
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
-      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment))
+      ; below just doesn't work as it should
+      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment next #f))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
       ((eq? '= (statement-type statement))        (interpret-assign statement environment next))
@@ -65,22 +66,31 @@
 
 ; to handel when a function was called
 (define interpret-function-call
-  (lambda (statement environment)
+  (lambda (statement environment next willReturn)
    ; (println "INTERPETING FUNCTION CALL")
     ;(println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
           (let ([closure (lookup (get-function-name statement) environment)])
-        ;    (println "closure")
-          ;  (println closure)
+            ;(println "closure")
+            ;(println closure)
             ; run the body of the function
-            ; issue here. Needs to return environment in case of return not used??
-            (interpret-statement-list (get-closure-body closure)
+            ; issue here. Needs to return environment in case of return not used?? rn returns a number
+            (begin
+              (interpret-statement-list (get-closure-body closure)
                                       ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                       (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                       (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env)))
+                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))
+              (if willReturn
+                  (interpret-statement-list (get-closure-body closure)
+                                      ; new state with formal/actual parameters added to the NEW state, with the closure in it
+                                      (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
+                                      (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
+                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))
+                  (next environment))
+            ))
       
         (myerror "Function undefined:" (get-function-name statement)))))
                 
@@ -201,7 +211,7 @@
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
       ((not (list? expr)) (lookup expr environment))
-      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment))
+      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment (lambda (v) v) #t))
       (else (eval-operator expr environment)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
