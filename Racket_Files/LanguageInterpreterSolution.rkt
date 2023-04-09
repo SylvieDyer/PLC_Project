@@ -72,26 +72,22 @@
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
-          (let ([closure (lookup (get-function-name statement) environment)])
-            ;(println "closure")
-            ;(println closure)
-            ; run the body of the function
-            ; issue here. Needs to return environment in case of return not used?? rn returns a number
-            (begin
-              (interpret-statement-list (get-closure-body closure)
-                                      ; new state with formal/actual parameters added to the NEW state, with the closure in it
-                                      (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
-                                      (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))
-              (if willReturn
-                  (interpret-statement-list (get-closure-body closure)
-                                      ; new state with formal/actual parameters added to the NEW state, with the closure in it
-                                      (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
-                                      (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))
-                  (next environment))
-            ))
-      
+        (let ([closure (lookup (get-function-name statement) environment)])
+          ;(println "closure")
+          ;(println closure)
+          ; determine the return value of the function
+          (let ([val (interpret-statement-list (get-closure-body closure)
+                                               ; new state with formal/actual parameters added to the NEW state, with the closure in it
+                                               (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
+                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
+                                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))])
+            ; if main returns this function,
+            (if willReturn
+                ; return the value
+                val
+                ; otherwise pass the environment (which has been changed based on the function)
+                (next environment))))
+        ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
 
