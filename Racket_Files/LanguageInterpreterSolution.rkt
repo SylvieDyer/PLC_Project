@@ -38,10 +38,10 @@
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
       ; below just doesn't work as it should
-      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment next #f))
+      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment return break continue throw next #f))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
-      ((eq? '= (statement-type statement))        (interpret-assign statement environment next))
+      ((eq? '= (statement-type statement))        (interpret-assign statement environment throw next))
       ((eq? 'if (statement-type statement))       (interpret-if statement environment return break continue throw next))
       ((eq? 'while (statement-type statement))    (interpret-while statement environment return throw next))
       ((eq? 'continue (statement-type statement)) (continue environment))
@@ -56,8 +56,7 @@
 (define interpret-function
   (lambda (statement environment next)
     ; continue on, after binding the closure to the function's name 
-    (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))
-    ))
+    (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))))
 
 ; to make the closure
 (define make-closure
@@ -66,9 +65,10 @@
 
 ; to handel when a function was called
 (define interpret-function-call
-  (lambda (statement environment next willReturn)
-   ; (println "INTERPETING FUNCTION CALL")
-    ;(println environment)
+  (lambda (statement environment throw next willReturn)
+    
+    (println "INTERPETING FUNCTION CALL")
+    (println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
@@ -80,13 +80,13 @@
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                                (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))])
+                                               (lambda (v env) (println "thrown") (throw v environment)) (lambda (env) (print "USED??")  env))])
             ; if main returns this function,
             (if willReturn
                 ; return the value
                 val
                 ; otherwise pass the environment (which has been changed based on the function)
-                (next environment))))
+                (next (pop-frame environment)))))
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
@@ -100,9 +100,7 @@
   (lambda (formal actual frame environment)
     (cond
       ((null? formal)   frame)
-      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment) ))))
-
-
+      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment)))))
 
 ; Calls the return continuation with the given expression value
 (define interpret-return
@@ -112,16 +110,34 @@
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
 (define interpret-declare
   (lambda (statement environment next)
-   ; (println statement)
     (if (exists-declare-value? statement)
         (next (insert (get-declare-var statement) (eval-expression (get-declare-value statement) environment) environment))
         (next (insert (get-declare-var statement) 'novalue environment)))))
 
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
-  (lambda (statement environment next)
-    (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)
-    (next environment)));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
+  (lambda (statement environment throw next)
+    (println "ASSIGN")
+    (println environment)
+    (println statement)
+    (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment) environment)))
+    (println environment)
+    (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
+
+(define updateStatementWithFunctions
+  (lambda (statement environment throw next updatedStatement cps-return)
+    (println "UDPATE STATEMENTS")
+    (println environment)
+    (cond
+      ((null?  statement)            (cps-return statement))
+      ((atom? statement)             (cps-return statement))
+      ((list? (car statement))            (updateStatementWithFunctions (car statement) environment throw next updatedStatement (lambda (s)
+                                                                                                                                           (updateStatementWithFunctions (cdr statement) environment throw next updatedStatement (lambda (s2)
+                                                                                                                                                                                                                               (cps-return (cons s s2)))))))
+      ((eq? (car statement) 'funcall)  (cps-return (interpret-function-call (cdr statement) environment throw  next #t)))
+      ; otherwise, keep searching through statements 
+      (else (updateStatementWithFunctions (cdr statement) 
+                                          environment throw next updatedStatement (lambda (s) (cps-return (cons (car statement) s))))))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
 (define interpret-if
@@ -194,6 +210,8 @@
 
 (define make-finally-block
   (lambda (finally-statement)
+    (println "FINALLY BLOCK")
+    (println finally-statement)
     (cond
       ((null? finally-statement) '(begin))
       ((not (eq? (statement-type finally-statement) 'finally)) (myerror "Incorrectly formatted finally block"))
@@ -202,12 +220,13 @@
 ; Evaluates all possible boolean and arithmetic expressions, including constants, variables, and function calls
 (define eval-expression
   (lambda (expr environment)
+   
     (cond
       ((number? expr) expr)
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
       ((not (list? expr)) (lookup expr environment))
-      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment (lambda (v) v) #t))
+     ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment (lambda (v) v) (lambda (v) v) #t))
       (else (eval-operator expr environment)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
@@ -441,6 +460,10 @@
   (lambda (frame)
     (cadr frame)))
 
+; if the value is an atom
+(define (atom? x)
+  (and (not (null? x))
+       (not (pair? x))))
 
 ; Functions to convert the Scheme #t and #f to our languages true and false, and back.
 
