@@ -22,14 +22,17 @@
   (lambda (statement-list environment return break continue throw next)
     (if (null? statement-list)
         (next environment)
-        (interpret-statement (car statement-list) environment return break continue throw (lambda (env) (interpret-statement-list (cdr statement-list) env return break continue throw next))))))
+        (interpret-statement (car statement-list) environment return break continue throw (lambda (env) (print "HERE NEXT") (interpret-statement-list (cdr statement-list) env return break continue throw next))))))
 
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment return break continue throw next)
   ;  (println "interpret statement")
-   ; (println environment)
-   ; (println statement)
+   ; (println "")
+  ; (println environment)
+   ;(print "STATEMENT: ")
+   ;(println statement)
+    ;(println "")
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
@@ -76,7 +79,7 @@
                                       ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                       (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                       (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))
+                                      (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env)))
       
         (myerror "Function undefined:" (get-function-name statement)))))
                 
@@ -110,7 +113,8 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment next)
-    (next (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
+    (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)
+    (next environment)));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
 (define interpret-if
@@ -344,10 +348,10 @@
 ; A helper function that does the lookup.  Returns an error if the variable does not have a legal value
 (define lookup-variable
   (lambda (var environment)
-    (let ((value (lookup-in-env var environment)))
+    (let ((value (lookup-in-env var environment))) 
       (if (eq? 'novalue value)
           (myerror "error: variable without an assigned value:" var)
-          value))))
+          value)))) 
 
 ; Return the value bound to a variable in the environment
 (define lookup-in-env
@@ -376,7 +380,7 @@
 (define get-value
   (lambda (n l)
     (cond
-      ((zero? n) (car l))
+      ((zero? n) (unbox (car l))) ; UNBOX THE CAR HERE
       (else (get-value (- n 1) (cdr l))))))
 
 ; Adds a new variable/value binding pair into the environment.  Gives an error if the variable already exists in this frame.
@@ -396,26 +400,29 @@
 ; Add a new variable/value pair to the frame.
 (define add-to-frame
   (lambda (var val frame)
-    (list (cons var (variables frame)) (cons (scheme->language val) (store frame)))))
+    (list (cons var (variables frame)) (cons (box (scheme->language val)) (store frame))))) ; BOX scheme->language result
 
 ; Changes the binding of a variable in the environment to a new value
 (define update-existing
   (lambda (var val environment)
     (if (exists-in-list? var (variables (car environment)))
-        (cons (update-in-frame var val (topframe environment)) (remainingframes environment))
-        (cons (topframe environment) (update-existing var val (remainingframes environment))))))
+        (update-in-frame var val (topframe environment))
+        (update-existing var val (remainingframes environment)))))
+       ; (cons (update-in-frame var val (topframe environment)) (remainingframes environment))
+        ;(cons (topframe environment) (update-existing var val (remainingframes environment))))))
 
 ; Changes the binding of a variable in the frame to a new value.
 (define update-in-frame
   (lambda (var val frame)
-    (list (variables frame) (update-in-frame-store var val (variables frame) (store frame)))))
+    ;(list (variables frame) (update-in-frame-store var val (variables frame) (store frame)))
+     (update-in-frame-store var val (variables frame) (store frame))))
 
 ; Changes a variable binding by placing the new value in the appropriate place in the store
 (define update-in-frame-store
   (lambda (var val varlist vallist)
     (cond
-      ((eq? var (car varlist)) (cons (scheme->language val) (cdr vallist)))
-      (else (cons (car vallist) (update-in-frame-store var val (cdr varlist) (cdr vallist)))))))
+      ((eq? var (car varlist))  (set-box! (car vallist) (scheme->language val)));(cons (scheme->language val) (cdr vallist))) ; SETBOX
+      (else (update-in-frame-store var val (cdr varlist) (cdr vallist))))));(cons (car vallist) (update-in-frame-store var val (cdr varlist) (cdr vallist)))))))
 
 ; Returns the list of variables from a frame
 (define variables
