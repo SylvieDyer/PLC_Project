@@ -67,8 +67,8 @@
 ; to handel when a function was called
 (define interpret-function-call
   (lambda (statement environment throw next willReturn)
-   ; (println "INTERPETING FUNCTION CALLLLL")
-   ; (println environment)
+    ;(println "INTERPETING FUNCTION CALLLLL")
+    ;(println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
@@ -80,13 +80,13 @@
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                                (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                               (lambda (v env) (print "USEDDD????? :") (println environment) (throw v environment)) ;(lambda (v env) (myerror "Uncaught exception thrown"))
+                                               throw;(lambda (v env) (print "USEDDD????? :") (println environment) (throw v environment)) ;(lambda (v env) (myerror "Uncaught exception thrown"))
                                                (lambda (env) (print "USED??") env))])
             ; if main returns this function,
             (if willReturn
                 ; return the value
                 (begin ;(print "RETURNING VAL ONLY: ") (println environment)
-                       val)
+                  val)
                 ; otherwise pass the environment (which has been changed based on the function)
                 (begin ;(println "RETURN TO NEXT IN FUNC CALL")
                        (next environment)))))
@@ -130,7 +130,8 @@
         ; run interpret-funccall w new throws, get value from that (willReturn True)
         (begin ;(println "FUNCALL FOUND") (print "ENV IS: ") (println environment)
                (update (get-assign-lhs statement)
-                (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement) (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement)) environment (lambda (v env) (print"THROW env: ") (println env)(throw v env)) (lambda (v) v) #t))
+                (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement) (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement)) environment (lambda (v env) (throw v environment))
+                                                                                                                                                      next #t));(lambda (v) v) #t))
                                  environment)
                 environment))
         (begin ;(println "IM here")
@@ -165,14 +166,18 @@
                                          return
                                          (lambda (env) (break (pop-frame env)))
                                          (lambda (env) (continue (pop-frame env)))
-                                         (lambda (v env) (print "THROW IN INTERPRET-BLOCK env: ") (println env)
-                                           (throw v (pop-frame env)))
-                                         (lambda (env) (next (pop-frame env))))))
+                                         throw
+                                         ;(lambda (v env) ;(print "THROW IN INTERPRET-BLOCK env: ") (println env)
+                                           ;(println "LOOK AT ME USED")
+                                           ;(throw v (pop-frame env)))
+                                           ;(throw v environment))
+                                         ;(lambda (env) (println "ME USED OOO")(next (pop-frame env))))))
+                                         next)))
 
 ; We use a continuation to throw the proper value.  Because we are not using boxes, the environment/state must be thrown as well so any environment changes will be kept
 (define interpret-throw
   (lambda (statement environment throw)
-   ; (print "INTERPRET THROW ENV IS : ") (println environment) (print "RESULT OF ENV IS: ") (println (eval-expression (get-expr statement) environment))
+    ;(print "INTERPRET THROW ENV IS : ") (println environment) (print "RESULT OF ENV IS: ") (println (eval-expression (get-expr statement) environment))
     (throw (eval-expression (get-expr statement) environment) environment)))
 
 ; Interpret a try-catch-finally block
@@ -192,8 +197,8 @@
                        return 
                        (lambda (env2) (break (pop-frame env2))) 
                        (lambda (env2) (continue (pop-frame env2))) 
-                       (lambda (v env2) (throw v (pop-frame env2))) 
-                       (lambda (env2) (interpret-block finally-block (pop-frame env2) return break continue throw next))))))))
+                       throw;(lambda (v env2) (throw v (pop-frame env2))) 
+                       next))))));(lambda (env2) (interpret-block finally-block (pop-frame env2) return break continue throw next)))))))) LOOOOK HERE
 
 ; To interpret a try block, we must adjust  the return, break, continue continuations to interpret the finally block if any of them are used.
 ;  We must create a new throw continuation and then interpret the try block with the new continuations followed by the finally block with the old continuations
