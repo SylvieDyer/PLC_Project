@@ -38,16 +38,16 @@
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
       ; below just doesn't work as it should
-      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment next #f))
+      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) (push-frame environment) throw next #f))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
-      ((eq? '= (statement-type statement))        (interpret-assign statement environment next))
+      ((eq? '= (statement-type statement))        (interpret-assign statement environment throw next))
       ((eq? 'if (statement-type statement))       (interpret-if statement environment return break continue throw next))
       ((eq? 'while (statement-type statement))    (interpret-while statement environment return throw next))
       ((eq? 'continue (statement-type statement)) (continue environment))
       ((eq? 'break (statement-type statement))    (break environment))
       ((eq? 'begin (statement-type statement))    (interpret-block statement environment return break continue throw next))
-      ((eq? 'throw (statement-type statement))    (interpret-throw statement environment throw))
+      ((eq? 'throw (statement-type statement))    (println "THROW INTERPRET CALLED")(interpret-throw statement environment throw))
       ((eq? 'try (statement-type statement))      (interpret-try statement environment return break continue throw next))
       (else (myerror "Unknown statement:"         (statement-type statement))))
     ))
@@ -66,27 +66,30 @@
 
 ; to handel when a function was called
 (define interpret-function-call
-  (lambda (statement environment next willReturn)
-   ; (println "INTERPETING FUNCTION CALL")
-    ;(println environment)
+  (lambda (statement environment throw next willReturn)
+   ; (println "INTERPETING FUNCTION CALLLLL")
+   ; (println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
         (let ([closure (lookup (get-function-name statement) environment)])
-          ;(println "closure")
+          ;(print "closure")
           ;(println closure)
           ; determine the return value of the function
           (let ([val (interpret-statement-list (get-closure-body closure)
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                                (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (print "USED??") env))])
+                                               (lambda (v env) (print "USEDDD????? :") (println environment) (throw v environment)) ;(lambda (v env) (myerror "Uncaught exception thrown"))
+                                               (lambda (env) (print "USED??") env))])
             ; if main returns this function,
             (if willReturn
                 ; return the value
-                val
+                (begin ;(print "RETURNING VAL ONLY: ") (println environment)
+                       val)
                 ; otherwise pass the environment (which has been changed based on the function)
-                (next environment))))
+                (begin ;(println "RETURN TO NEXT IN FUNC CALL")
+                       (next environment)))))
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
@@ -119,8 +122,22 @@
 
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
-  (lambda (statement environment next)
-    (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)
+  (lambda (statement environment throw next)
+    ;(print "Statement is: ") (println statement)
+    ; check if there is an associated funccall. If <0 then there is
+   ; (print "INDEX IS: " ) (println (indexof 'funcall (get-assign-rhs statement)))
+    (if (< 0 (indexof 'funcall (get-assign-rhs statement)))
+        ; run interpret-funccall w new throws, get value from that (willReturn True)
+        (begin ;(println "FUNCALL FOUND") (print "ENV IS: ") (println environment)
+               (update (get-assign-lhs statement)
+                (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement) (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement)) environment (lambda (v env) (print"THROW env: ") (println env)(throw v env)) (lambda (v) v) #t))
+                                 environment)
+                environment))
+        (begin ;(println "IM here")
+               (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)))
+    
+   ; (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)
+   ; (print "NEXT NEXT, ENV :") (println environment)
     (next environment)));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
@@ -148,24 +165,27 @@
                                          return
                                          (lambda (env) (break (pop-frame env)))
                                          (lambda (env) (continue (pop-frame env)))
-                                         (lambda (v env) (throw v (pop-frame env)))
+                                         (lambda (v env) (print "THROW IN INTERPRET-BLOCK env: ") (println env)
+                                           (throw v (pop-frame env)))
                                          (lambda (env) (next (pop-frame env))))))
 
 ; We use a continuation to throw the proper value.  Because we are not using boxes, the environment/state must be thrown as well so any environment changes will be kept
 (define interpret-throw
   (lambda (statement environment throw)
+   ; (print "INTERPRET THROW ENV IS : ") (println environment) (print "RESULT OF ENV IS: ") (println (eval-expression (get-expr statement) environment))
     (throw (eval-expression (get-expr statement) environment) environment)))
 
 ; Interpret a try-catch-finally block
 
-; Create a continuation for the throw.  If there is no catch, it has to interpret the finally block, and once that completes throw the exception.
+; Create a continuation for the throw. If there is no catch, it has to interpret the finally block, and once that completes throw the exception.
 ;   Otherwise, it interprets the catch block with the exception bound to the thrown value and interprets the finally block when the catch is done
 (define create-throw-catch-continuation
   (lambda (catch-statement environment return break continue throw next finally-block)
     (cond
-      ((null? catch-statement) (lambda (ex env) (interpret-block finally-block env return break continue throw (lambda (env2) (throw ex env2))))) 
+      ((null? catch-statement) (lambda (ex env)  (println "OTHER THTOW CALLED") (interpret-block finally-block env return break continue throw (lambda (env2) (throw ex env2))))) 
       ((not (eq? 'catch (statement-type catch-statement))) (myerror "Incorrect catch statement"))
       (else (lambda (ex env)
+             ; (print "CON THROW ENV IS: ") (println env)
                   (interpret-statement-list 
                        (get-body catch-statement) 
                        (insert (catch-var catch-statement) ex (push-frame env))
@@ -207,7 +227,7 @@
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
       ((not (list? expr)) (lookup expr environment))
-      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment (lambda (v) v) #t))
+      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment (lambda (v env) v)(lambda (v) v) #t))
       (else (eval-operator expr environment)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
@@ -237,7 +257,7 @@
       ((eq? '>= (operator expr)) (>= op1value (eval-expression (operand2 expr) environment)))
       ((eq? '|| (operator expr)) (or op1value (eval-expression (operand2 expr) environment)))
       ((eq? '&& (operator expr)) (and op1value (eval-expression (operand2 expr) environment)))
-      (else (myerror "Unknown operator:" (operator expr))))))
+      (else (println expr)(myerror "Unknown operator:" (operator expr))))))
 
 ; Determines if two values are equal.  We need a special test because there are both boolean and integer types.
 (define isequal
@@ -379,9 +399,32 @@
 (define indexof
   (lambda (var l)
     (cond
-      ((null? l) 0)  ; should not happen
+      ((or (null? l) (not (list? l))) -100)  ; should not happen
+      ((and (list? (car l)) (eq? var (caar l))) 0)
       ((eq? var (car l)) 0)
       (else (+ 1 (indexof var (cdr l)))))))
+
+; get whatever is at that index
+(define getAtIndex
+  (lambda (index l)
+    (getAtIndex-helper index 0 l)));(lambda (v) v))))
+
+(define getAtIndex-helper
+  (lambda (index currIndex l)
+    (if (eq? index currIndex)
+        (cdar l)
+        (getAtIndex-helper index (+ currIndex 1) (cdr l)))))
+
+; at index replace current val of l with new val
+(define replaceIndexWith
+  (lambda (index l newVal)
+    (replaceIndexWith-helper index 0 l newVal (lambda (v) v))))
+
+(define replaceIndexWith-helper
+  (lambda (index currIndex l newVal return)
+    (if (eq? index currIndex)
+        (return (cons newVal  (cdr l)))
+        (replaceIndexWith-helper index (+ currIndex 1) (cdr l) newVal (lambda (v) (return (cons (car l) v)))))))
 
 ; Get the value stored at a given index in the list
 (define get-value
@@ -402,7 +445,7 @@
   (lambda (var val environment)
     (if (exists? var environment)
         (update-existing var val environment)
-        (myerror "error: variable used but not defined:" var))))
+        (begin (print "env: ") (println environment)(myerror "error: variable used but not defined:" var)))))
 
 ; Add a new variable/value pair to the frame.
 (define add-to-frame
