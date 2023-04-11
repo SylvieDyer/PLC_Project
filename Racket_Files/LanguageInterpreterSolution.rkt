@@ -13,9 +13,10 @@
 (define interpret
   (lambda (file)
     (scheme->language
-     (interpret-statement-list (parser file) (newenvironment) (lambda (v) v)
+     (call/cc (lambda (k)
+     (interpret-statement-list (parser file) (newenvironment) k;(lambda (v)  v)
                                (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))))
+                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env))))) ))
 
 ; interprets a list of statements.  The state/environment from each statement is used for the next ones.
 (define interpret-statement-list
@@ -27,12 +28,6 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment return break continue throw next)
-  ;  (println "interpret statement")
-   ; (println "")
-  ; (println environment)
-   ;(print "STATEMENT: ")
-   ;(println statement)
-    ;(println "")
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
@@ -47,7 +42,7 @@
       ((eq? 'continue (statement-type statement)) (continue environment))
       ((eq? 'break (statement-type statement))    (break environment))
       ((eq? 'begin (statement-type statement))    (interpret-block statement environment return break continue throw next))
-      ((eq? 'throw (statement-type statement))    (println "THROW INTERPRET CALLED")(interpret-throw statement environment throw))
+      ((eq? 'throw (statement-type statement))    (interpret-throw statement environment throw))
       ((eq? 'try (statement-type statement))      (interpret-try statement environment return break continue throw next))
       (else (myerror "Unknown statement:"         (statement-type statement))))
     ))
@@ -67,29 +62,25 @@
 ; to handel when a function was called
 (define interpret-function-call
   (lambda (statement environment throw next willReturn)
-    ;(println "INTERPETING FUNCTION CALLLLL")
-    ;(println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
         (let ([closure (lookup (get-function-name statement) environment)])
-          ;(print "closure")
-          ;(println closure)
+
           ; determine the return value of the function
           (let ([val (interpret-statement-list (get-closure-body closure)
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                                (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
-                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
+                                               (lambda (v) v)
+                                               (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
                                                throw;(lambda (v env) (print "USEDDD????? :") (println environment) (throw v environment)) ;(lambda (v env) (myerror "Uncaught exception thrown"))
-                                               (lambda (env) (print "USED??") env))])
+                                               (lambda (env)  env))]) ;env ???
             ; if main returns this function,
             (if willReturn
                 ; return the value
-                (begin ;(print "RETURNING VAL ONLY: ") (println environment)
-                  val)
+                val
                 ; otherwise pass the environment (which has been changed based on the function)
-                (begin ;(println "RETURN TO NEXT IN FUNC CALL")
-                       (next environment)))))
+                (next environment))))
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
@@ -115,7 +106,6 @@
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
 (define interpret-declare
   (lambda (statement environment next)
-   ; (println statement)
     (if (exists-declare-value? statement)
         (next (insert (get-declare-var statement) (eval-expression (get-declare-value statement) environment) environment))
         (next (insert (get-declare-var statement) 'novalue environment)))))
@@ -123,23 +113,16 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment throw next)
-    ;(print "Statement is: ") (println statement)
-    ; check if there is an associated funccall. If <0 then there is
-   ; (print "INDEX IS: " ) (println (indexof 'funcall (get-assign-rhs statement)))
     (if (< 0 (indexof 'funcall (get-assign-rhs statement)))
         ; run interpret-funccall w new throws, get value from that (willReturn True)
-        (begin ;(println "FUNCALL FOUND") (print "ENV IS: ") (println environment)
-               (update (get-assign-lhs statement)
+        (update (get-assign-lhs statement)
                 (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement) (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement)) environment (lambda (v env) (throw v environment))
                                                                                                                                                       next #t));(lambda (v) v) #t))
                                  environment)
-                environment))
-        (begin ;(println "IM here")
-               (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)))
+                environment)
+        (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))
     
-   ; (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment)
-   ; (print "NEXT NEXT, ENV :") (println environment)
-    (next environment)));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
+    (next environment)))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
 (define interpret-if
@@ -162,22 +145,21 @@
 (define interpret-block
   (lambda (statement environment return break continue throw next)
     (interpret-statement-list (cdr statement)
-                                         (push-frame environment)
+                                         environment;(push-frame environment)
                                          return
                                          (lambda (env) (break (pop-frame env)))
                                          (lambda (env) (continue (pop-frame env)))
                                          throw
-                                         ;(lambda (v env) ;(print "THROW IN INTERPRET-BLOCK env: ") (println env)
+                                         ;;(lambda (v env) ;(print "THROW IN INTERPRET-BLOCK env: ") (println env)
                                            ;(println "LOOK AT ME USED")
                                            ;(throw v (pop-frame env)))
                                            ;(throw v environment))
-                                         ;(lambda (env) (println "ME USED OOO")(next (pop-frame env))))))
+                                         ;(lambda (env) (next env)))))
                                          next)))
 
 ; We use a continuation to throw the proper value.  Because we are not using boxes, the environment/state must be thrown as well so any environment changes will be kept
 (define interpret-throw
   (lambda (statement environment throw)
-    ;(print "INTERPRET THROW ENV IS : ") (println environment) (print "RESULT OF ENV IS: ") (println (eval-expression (get-expr statement) environment))
     (throw (eval-expression (get-expr statement) environment) environment)))
 
 ; Interpret a try-catch-finally block
@@ -187,18 +169,17 @@
 (define create-throw-catch-continuation
   (lambda (catch-statement environment return break continue throw next finally-block)
     (cond
-      ((null? catch-statement) (lambda (ex env)  (println "OTHER THTOW CALLED") (interpret-block finally-block env return break continue throw (lambda (env2) (throw ex env2))))) 
+      ((null? catch-statement) (lambda (ex env) (interpret-block finally-block env return break continue throw (lambda (env2) (throw ex env2))))) 
       ((not (eq? 'catch (statement-type catch-statement))) (myerror "Incorrect catch statement"))
       (else (lambda (ex env)
-             ; (print "CON THROW ENV IS: ") (println env)
                   (interpret-statement-list 
                        (get-body catch-statement) 
                        (insert (catch-var catch-statement) ex (push-frame env))
-                       return 
+                       return
                        (lambda (env2) (break (pop-frame env2))) 
                        (lambda (env2) (continue (pop-frame env2))) 
                        throw;(lambda (v env2) (throw v (pop-frame env2))) 
-                       next))))));(lambda (env2) (interpret-block finally-block (pop-frame env2) return break continue throw next)))))))) LOOOOK HERE
+                       (lambda (env2) (interpret-block finally-block env2 return break continue throw next)))))))); LOOOOK HERE
 
 ; To interpret a try block, we must adjust  the return, break, continue continuations to interpret the finally block if any of them are used.
 ;  We must create a new throw continuation and then interpret the try block with the new continuations followed by the finally block with the old continuations
@@ -209,8 +190,8 @@
            (new-return (lambda (v) (interpret-block finally-block environment return break continue throw (lambda (env2) (return v)))))
            (new-break (lambda (env) (interpret-block finally-block env return break continue throw (lambda (env2) (break env2)))))
            (new-continue (lambda (env) (interpret-block finally-block env return break continue throw (lambda (env2) (continue env2)))))
-           (new-throw (create-throw-catch-continuation (get-catch statement) environment return break continue throw next finally-block)))
-      (interpret-block try-block environment new-return new-break new-continue new-throw (lambda (env) (interpret-block finally-block env return break continue throw next))))))
+           (new-throw (create-throw-catch-continuation (get-catch statement) environment (lambda (v) (return v)) break continue throw next finally-block)))
+      (interpret-block try-block environment new-return new-break new-continue new-throw (lambda (env) (interpret-block finally-block env (lambda (v) (return v)) break continue throw next))))))
 
 ; helper methods so that I can reuse the interpret-block method on the try and finally blocks
 (define make-try-block
@@ -450,7 +431,7 @@
   (lambda (var val environment)
     (if (exists? var environment)
         (update-existing var val environment)
-        (begin (print "env: ") (println environment)(myerror "error: variable used but not defined:" var)))))
+        (myerror "error: variable used but not defined:" var))))
 
 ; Add a new variable/value pair to the frame.
 (define add-to-frame
