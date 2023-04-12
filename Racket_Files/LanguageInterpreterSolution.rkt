@@ -1,7 +1,8 @@
-; If you are using scheme instead of racket, comment these two lines, uncomment the (load "simpleParser.scm") and comment the (require "simpleParser.rkt")
+; Imperitive Language Interpreter Project
+; Luis Torres & Sylvie Dyer
+; Based on Professor Connamacher's Language Interpreter, CPS Version
 #lang racket
 (require "functionParser.rkt")
-(provide (all-defined-out))
 ; (load "simpleParser.scm")
 
 ; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
