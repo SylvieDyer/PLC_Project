@@ -13,9 +13,10 @@
 (define interpret
   (lambda (file)
     (scheme->language
-     (interpret-statement-list (parser file) (newenvironment) (lambda (v) v)
+     (call/cc (lambda (k)
+     (interpret-statement-list (parser file) (newenvironment) k
                                (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))))
+                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env))))) ))
 
 ; interprets a list of statements.  The state/environment from each statement is used for the next ones.
 (define interpret-statement-list
@@ -27,18 +28,11 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment return break continue throw next)
-  ;  (println "interpret statement")
-   ; (println "")
-  ; (println environment)
-   ;(print "STATEMENT: ")
-   ;(println statement)
-    ;(println "")
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
-      ; below just doesn't work as it should
-      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) environment return break continue throw next #f))
+      ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) (push-frame environment) throw next #f))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
       ((eq? '= (statement-type statement))        (interpret-assign statement environment throw next))
@@ -58,29 +52,19 @@
     ; continue on, after binding the closure to the function's name 
     (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))))
 
-; to make the closure
-(define make-closure
-  (lambda (formal-params body environment)
-    (cons formal-params (cons body (cons environment '())))))
-
 ; to handel when a function was called
 (define interpret-function-call
   (lambda (statement environment throw next willReturn)
-    
-    (println "INTERPETING FUNCTION CALL")
-    (println environment)
     ; check if the function has been declared
     (if (exists? (get-function-name statement) environment)
         ; get the closure
         (let ([closure (lookup (get-function-name statement) environment)])
-          ;(println "closure")
-          ;(println closure)
           ; determine the return value of the function
           (let ([val (interpret-statement-list (get-closure-body closure)
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
                                                (add-frame (bind-parameters (get-closure-params closure) (cdr statement) environment) (insert (get-function-name statement) closure (get-closure-state closure)))
                                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                                               (lambda (v env) (println "thrown") (throw v environment)) (lambda (env) (print "USED??")  env))])
+                                               (lambda (v env) (throw v environment)) (lambda (env) env))])
             ; if main returns this function,
             (if willReturn
                 ; return the value
@@ -90,18 +74,6 @@
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
-
-; binding formal and actual parameters into a frame and returning that frame
-(define bind-parameters
-  (lambda (formal actual environment)
-    (bind-parameters-helper formal actual (newenvironment) environment)))
-
-(define bind-parameters-helper
-  (lambda (formal actual frame environment)
-    (cond
-      ((null? formal)   frame)
-      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment)))))
-
 ; Calls the return continuation with the given expression value
 (define interpret-return
   (lambda (statement environment return)
@@ -117,27 +89,8 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment throw next)
-    (println "ASSIGN")
-    (println environment)
-    (println statement)
     (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment) environment)))
-    (println environment)
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
-
-(define updateStatementWithFunctions
-  (lambda (statement environment throw next updatedStatement cps-return)
-    (println "UDPATE STATEMENTS")
-    (println environment)
-    (cond
-      ((null?  statement)            (cps-return statement))
-      ((atom? statement)             (cps-return statement))
-      ((list? (car statement))            (updateStatementWithFunctions (car statement) environment throw next updatedStatement (lambda (s)
-                                                                                                                                           (updateStatementWithFunctions (cdr statement) environment throw next updatedStatement (lambda (s2)
-                                                                                                                                                                                                                               (cps-return (cons s s2)))))))
-      ((eq? (car statement) 'funcall)  (cps-return (interpret-function-call (cdr statement) environment throw  next #t)))
-      ; otherwise, keep searching through statements 
-      (else (updateStatementWithFunctions (cdr statement) 
-                                          environment throw next updatedStatement (lambda (s) (cps-return (cons (car statement) s))))))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
 (define interpret-if
@@ -210,8 +163,6 @@
 
 (define make-finally-block
   (lambda (finally-statement)
-    (println "FINALLY BLOCK")
-    (println finally-statement)
     (cond
       ((null? finally-statement) '(begin))
       ((not (eq? (statement-type finally-statement) 'finally)) (myerror "Incorrectly formatted finally block"))
@@ -464,6 +415,41 @@
 (define (atom? x)
   (and (not (null? x))
        (not (pair? x))))
+
+; to make the closure
+(define make-closure
+  (lambda (formal-params body environment)
+    (cons formal-params (cons body (cons environment '())))))
+
+; binding formal and actual parameters into a frame and returning that frame
+(define bind-parameters
+  (lambda (formal actual environment)
+    (if (eq? (length actual) (length formal))
+        (bind-parameters-helper formal actual (newenvironment) environment)
+        (myerror "Mismatched parameters and argiments."))))
+
+(define bind-parameters-helper
+  (lambda (formal actual frame environment)
+    (cond
+      ((null? formal)   frame)
+      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment)))))
+
+; updates a statement with functions to evaluate the function values
+(define updateStatementWithFunctions
+  (lambda (statement environment throw next updatedStatement cps-return)
+    (cond
+      ((null?  statement)            (cps-return statement))
+      ((atom? statement)             (cps-return statement))
+      ; if the statement includes a sublist, recurse
+      ((list? (car statement))            (updateStatementWithFunctions (car statement) environment throw next updatedStatement (lambda (s)
+                                                                                                                                           (updateStatementWithFunctions (cdr statement) environment throw next updatedStatement (lambda (s2)
+                                                                                                                                                                                                                               (cps-return (cons s s2)))))))
+      ; if there is a function call, evaluate the function
+      ((eq? (car statement) 'funcall)  (cps-return (interpret-function-call (cdr statement) environment throw  next #t)))
+      ; otherwise, keep searching through statements 
+      (else (updateStatementWithFunctions (cdr statement) 
+                                          environment throw next updatedStatement (lambda (s) (cps-return (cons (car statement) s))))))))
+
 
 ; Functions to convert the Scheme #t and #f to our languages true and false, and back.
 
