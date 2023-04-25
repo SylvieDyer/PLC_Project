@@ -14,7 +14,7 @@
   (lambda (file)
     (scheme->language
      (call/cc (lambda (k)
-     (interpret-statement-list (parser file) (newenvironment) k;(lambda (v)  v)
+     (interpret-statement-list (parser file) (newenvironment) k
                                (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
                                (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env))))) ))
 
@@ -32,7 +32,6 @@
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) return break continue throw next))
       ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) environment next))
-      ; below just doesn't work as it should
       ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) (push-frame environment) throw next #f))
       ((eq? 'return (statement-type statement))   (interpret-return statement environment return))
       ((eq? 'var (statement-type statement))      (interpret-declare statement environment next))
@@ -51,13 +50,7 @@
 (define interpret-function
   (lambda (statement environment next)
     ; continue on, after binding the closure to the function's name 
-    (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))
-    ))
-
-; to make the closure
-(define make-closure
-  (lambda (formal-params body environment)
-    (cons formal-params (cons body (cons environment '())))))
+    (next (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) environment) environment))))
 
 ; to handel when a function was called
 (define interpret-function-call
@@ -66,7 +59,6 @@
     (if (exists? (get-function-name statement) environment)
         ; get the closure
         (let ([closure (lookup (get-function-name statement) environment)])
-
           ; determine the return value of the function
           (let ([val (interpret-statement-list (get-closure-body closure)
                                                ; new state with formal/actual parameters added to the NEW state, with the closure in it
@@ -84,20 +76,6 @@
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
                 
-
-; binding formal and actual parameters into a frame and returning that frame
-(define bind-parameters
-  (lambda (formal actual environment)
-    (bind-parameters-helper formal actual (newenvironment) environment)))
-
-(define bind-parameters-helper
-  (lambda (formal actual frame environment)
-    (cond
-      ((null? formal)   frame)
-      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment) ))))
-
-
-
 ; Calls the return continuation with the given expression value
 (define interpret-return
   (lambda (statement environment return)
@@ -113,13 +91,19 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment throw next)
+    ; if there are function calls in the assign
     (if (< 0 (indexof 'funcall (get-assign-rhs statement)))
         ; run interpret-funccall w new throws, get value from that (willReturn True)
         (update (get-assign-lhs statement)
-                (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement) (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement)) (get-assign-rhs statement)) environment (lambda (v env) (throw v environment))
-                                                                                                                                                      next #t));(lambda (v) v) #t))
+                (eval-expression (replaceIndexWith (indexof 'funcall (get-assign-rhs statement))
+                                                   (get-assign-rhs statement)
+                                                   (interpret-function-call (getAtIndex (indexof 'funcall (get-assign-rhs statement))
+                                                                                        (get-assign-rhs statement))
+                                                                            environment (lambda (v env) (throw v environment))
+                                                                            next #t))
                                  environment)
                 environment)
+        ; otherwise, evaluate rhs as normal
         (update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))
     
     (next environment)))
@@ -471,8 +455,30 @@
     (cadr frame)))
 
 
-; Functions to convert the Scheme #t and #f to our languages true and false, and back.
+; to make the closure
+(define make-closure
+  (lambda (formal-params body environment)
+    (cons formal-params (cons body (cons environment '())))))
 
+; binding formal and actual parameters into a frame and returning that frame
+(define bind-parameters
+  (lambda (formal actual environment)
+    ; if there are the same number of formal and actual parameters
+    (if (eq? (length formal) (length actual))
+        ; bind the parameters 
+        (bind-parameters-helper formal actual (newenvironment) environment)
+        ; otherwise, error
+        (myerror "Mismatched parameters and arguments." ))))
+
+(define bind-parameters-helper
+  (lambda (formal actual frame environment)
+    (cond
+      ((null? formal)   frame)
+      (else            (bind-parameters-helper (cdr formal) (cdr actual) (insert (operator formal) (eval-expression (operator actual) environment) frame) environment) ))))
+
+
+
+; Functions to convert the Scheme #t and #f to our languages true and false, and back.
 (define language->scheme
   (lambda (v) 
     (cond 
