@@ -49,9 +49,11 @@
 ; -------------------- NEW TOP LEVEL STUFF FOR THE GLOBAL ENV STORING CLASSES ------------
 ; WILL WANT OT RENAME OR DELETE BUT I WAS TOO SCARED SO WE'LL DEAL
 (define NEWINTERPRET
-  (lambda (file)
+  (lambda (file classname)
     (scheme->language
-              (INTERPRET-LIST (parser file) (newenvironment) (lambda (globalEnv) (println "global env")(println globalEnv) globalEnv)))))
+              (INTERPRET-LIST (parser file) (newenvironment) (lambda (globalEnv)
+                                                               ;(println "global env")(println globalEnv)
+                                                               (call-main classname globalEnv))))))
 
 (define INTERPRET-LIST
   (lambda (class-list globalEnvironment next)
@@ -93,7 +95,7 @@
                              (lambda (s f m)
                                (make-class-closure (class-name classDefinition) s f m environment next)))
                                                                                                                          
-        ; otherwise, use this class for the parent [MAY BE SOMETHING ELSE FOR NAME]
+        ; otherwise, use this class for the parent [TODO: MAY BE SOMETHING ELSE FOR NAME]
         (build-class-closure (class-dec classDefinition)
                              (class-name classDefinition)
                              (newenvironment)
@@ -104,6 +106,16 @@
 (define make-class-closure
   (lambda (className superClass fieldsList methodsList globalEnvironment next)
     (next (insert className (cons superClass (cons fieldsList (cons methodsList '()))) globalEnvironment))))
+
+(define instantiate
+  (lambda (classname environment)
+    ;(print "instantiating")
+    ;(println classname)
+    
+    ; runtime type: classname
+    ; values fo reach instance field (TODO: not initialized): get-closure-fieldList (lookup classname environment)
+    (cons classname (cons (get-closure-fieldsList (lookup classname environment)) '()))))
+  
 
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
 (define class-declare
@@ -147,6 +159,21 @@
                 (next (pop-frame environment)))))
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
+
+
+(define call-main
+  (lambda (classname globalEnv)
+    ; the closure of the given class : lookup classname globalEnv
+    ; the methods list : get-closure-methodsList (lookup clasname globalEnv)
+    ; the main method closure : lookup 'main ^^
+    (let ([main-closure (lookup-in-frame 'main (get-closure-methodsList (lookup classname globalEnv)))])
+      (interpret-statement-list (get-closure-body main-closure)
+                                ;not sure which env this is, but all i know is there are no parameters to bind so we add a frame (also wont recursively call main i dont think )
+                                (add-frame (newenvironment) globalEnv)
+                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop")) (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))))
+
+
+    
 
 ; ---- end of the suff used for classes lmao 
 
@@ -262,6 +289,7 @@
 (define eval-operator
   (lambda (expr environment)
     (cond
+      ((eq? 'new (operator expr)) (instantiate (operand1 expr) environment))
       ((eq? '! (operator expr)) (not (eval-expression (operand1 expr) environment)))
       ((and (eq? '- (operator expr)) (= 2 (length expr))) (- (eval-expression (operand1 expr) environment)))
       (else (eval-binary-op2 expr (eval-expression (operand1 expr) environment) environment)))))
@@ -269,6 +297,7 @@
 ; Complete the evaluation of the binary operator by evaluating the second operand and performing the operation.
 (define eval-binary-op2
   (lambda (expr op1value environment)
+    (println (operand1 expr))
     (cond
       ((eq? '+ (operator expr)) (+ op1value (eval-expression (operand2 expr) environment)))
       ((eq? '- (operator expr)) (- op1value (eval-expression (operand2 expr) environment)))
@@ -357,11 +386,15 @@
 (define get-class-closure
   (lambda (class-binding)
     (unbox (caadr class-binding))))
+; get the closure of a clas 
+(define get-closure-of
+  (lambda (classname environment)
+    (lookup classname environment)))
 
 ; items given the closure (unboxed)
 (define get-closure-super operator)
 (define get-closure-fieldsList caadr)
-(define get-cosure-methodsList caaddr)
+(define get-closure-methodsList caaddr)
 
 
 (define catch-var
