@@ -61,18 +61,19 @@
         (next globalEnvironment)
         (interpret-classes (car class-list) globalEnvironment (lambda (newEnv) (INTERPRET-LIST (cdr class-list) newEnv next))))))
 
+; each statement in the list is a class (not the conditional as in interpret-statement)
 (define interpret-classes
   (lambda (class globalEnvironment next)
     (interpret-class (cdr class) globalEnvironment next)))
 
-; Recursively builds the components of the class' closure 
+; Recursively builds the elements of the class' closure 
 (define build-class-closure
   (lambda (classDefinitionList super fieldsList methodsList classNext)
     (if (null? classDefinitionList)
         (classNext super fieldsList methodsList)
         (add-to-class-closure (car classDefinitionList) super fieldsList methodsList (lambda (s f m) (build-class-closure (cdr classDefinitionList) s f m classNext))))))
 
-; building the class closure (maybe will be the same as interpret statement
+; building the class closure ^ called by build (maybe will be the same as interpret statement TODO:
 (define add-to-class-closure
   (lambda (statement super fieldsList methodsList classNext)
     (cond
@@ -103,10 +104,12 @@
                              (lambda (s f m)
                                (make-class-closure (class-name classDefinition) s f m environment next))))))
 
+; takes the elements and makes the closure
 (define make-class-closure
   (lambda (className superClass fieldsList methodsList globalEnvironment next)
     (next (insert className (cons superClass (cons fieldsList (cons methodsList '()))) globalEnvironment))))
 
+; handling new, creating an instance 
 (define instantiate
   (lambda (classname environment)
     ;(print "instantiating")
@@ -124,7 +127,8 @@
         (classNext super (insert (get-declare-var statement) (eval-expression (get-declare-value statement) fieldsList) fieldsList) methodsList)
         (classNext super (insert (get-declare-var statement) 'novalue fieldsList) methodsList))))
 
-; assigns a field name to an expression to compute its value  THINK THIS WAS WASTE OF TIEM 
+; assigns a field name to an expression to compute its value
+; THINK THIS WAS WASTE OF TIME, ISNT ACTUALLY CALLED RN
 (define class-assign
   (lambda (statement super fieldsList methodsList classNext)
     ; match instance field name with expression to compute initial value
@@ -160,7 +164,7 @@
         ; if the function hasn't been declared 
         (myerror "Function undefined:" (get-function-name statement)))))
 
-
+; to call the specified class's main method at the end of interpreting
 (define call-main
   (lambda (classname globalEnv)
     ; the closure of the given class : lookup classname globalEnv
