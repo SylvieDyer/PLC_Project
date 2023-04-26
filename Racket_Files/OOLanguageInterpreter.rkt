@@ -3,6 +3,7 @@
 ; Based on Professor Connamacher's Language Interpreter, CPS Version
 #lang racket
 (require "classParser.rkt")
+
 ; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
 
 ; The functions that start interpret-...  all return the current environment.  These are the M_state functions.
@@ -219,7 +220,7 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment currType instance throw next)
-    (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment) environment)))
+    (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment)))
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
