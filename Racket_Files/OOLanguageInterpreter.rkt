@@ -4,6 +4,7 @@
 #lang racket
 (require "classParser.rkt")
 (provide (all-defined-out))
+
 ; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
 
 ; The functions that start interpret-...  all return the current environment.  These are the M_state functions.
@@ -221,7 +222,6 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment currType instance throw next)
-
     (if (list? (get-assign-lhs statement))
         (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (begin (println "in here") (println (get-assign-lhs statement)) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance) (cons (get-instance-fieldsList (dot (cadr (get-assign-lhs statement)) environment) ) '())))))
         (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (begin (println (get-assign-lhs statement)) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment))))
