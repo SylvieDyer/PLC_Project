@@ -28,6 +28,7 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment currType instance return break continue throw next)
+(println environment)
     (cond
       ; if at main function, want to run automatically
       ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) currType instance return break continue throw next))
@@ -220,7 +221,12 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment currType instance throw next)
-    (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment) environment)))
+
+    (if (list? (get-assign-lhs statement))
+        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (begin (println "in here") (println (get-assign-lhs statement)) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance) (cons (get-instance-fieldsList (dot (cadr (get-assign-lhs statement)) environment) ) '())))))
+        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (begin (println (get-assign-lhs statement)) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment))))
+        )
+    (println "Updated statemtn")
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
@@ -535,6 +541,7 @@
 ; Changes the binding of a variable to a new value in the environment.  Gives an error if the variable does not exist.
 (define update
   (lambda (var val environment)
+    (println environment)
     (if (exists? var environment)
         (update-existing var val environment)
         (myerror "error: variable used but not defined:" var))))
