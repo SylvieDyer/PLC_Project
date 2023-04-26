@@ -3,6 +3,7 @@
 ; Based on Professor Connamacher's Language Interpreter, CPS Version
 #lang racket
 (require "classParser.rkt")
+(provide (all-defined-out))
 ; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
 
 ; The functions that start interpret-...  all return the current environment.  These are the M_state functions.

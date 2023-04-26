@@ -1,5 +1,5 @@
 #lang racket
-(require "../LanguageInterpreterSolution.rkt")
+(require "../OOLanguageInterpreter.rkt")
 
 ; (runTest 1) to run tests corresponding to proj 1
 ; (runTest 2) to run tests corresponding to proj 2
@@ -10,6 +10,9 @@
     ;(let ([tests '("t1.txt" "t2.txt" "t3.txt" "t4.txt" "t5.txt")])
 
     (runTest-helper '(
+                      ("4t1.txt" A 15) ("4t2.txt" A 12) ("4t3.txt" A 125) ("4t4.txt" A 36) ("4t5.txt" A 54) ("4t6.txt" A 110)
+                                       ("4t7.txt" C 26) ("4t8.txt" Square 117) ("4t9.txt" Square 32) ("4t10.txt"List 15) ("4t11.txt" List 123456)
+                                       ("4t12.txt" List 5285) ("4t13.txt" C -716))
                      ; ("3t1.txt" 10) ("3t2.txt" 14) ("3t3.txt" 45)
                      ;                 ("3t4.txt" 55)
                      ;                 ("3t5.txt" 1) ("3t6.txt" 115) ("3t7.txt" true) ("3t8.txt" 20) ("3t9.txt" 24)
@@ -35,7 +38,7 @@
 (define runTest-helper
   (lambda (tests)
     (print (car tests))
-    (if (eq? (interpret (caar tests)) (cadar tests))
+    (if (eq? (NEWINTERPRET (caar tests) (cadar tests)) (caddar tests))
         (println "Warm Fuzzies ")
         (begin (print "Test Failed :( Incorrect output given is:") (println (interpret (caar tests)))))
     (if (null? (cdr tests))
