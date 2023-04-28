@@ -29,8 +29,10 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment currType instance return break continue throw next)
-   ; (println "INTERPRET STATEMENT")
-   ; (println statement)
+    (println "INTERPRET STATEMENT")
+    (println statement)
+    (println instance)
+    (println currType)
    ; (println "")
    ;; (println environment)
    ; (println "")
@@ -114,10 +116,10 @@
                              (lambda (s f m)
                                (make-class-closure (class-name classDefinition) s f m globalEnvironment next))))))
 
-; takes the elements and makes the closure
+; takes the elements and makes the closure [FINAL BUILD METHOD]
 (define make-class-closure
   (lambda (className superClass fieldsList methodsList globalEnvironment next)
-    (next (insert className (cons superClass (cons fieldsList (cons methodsList '()))) globalEnvironment))))
+    (next (insert className (cons superClass (cons fieldsList (cons methodsList (cons className '())))) globalEnvironment))))
 
 ; handling new, creating an instance 
 (define instantiate
@@ -202,26 +204,47 @@
     ; instanceName: (cadr (car statement))
     ; functionName: (caddr (car statement))
   ;  (println statement)
-   (let ([classClosure (lookup (class-name (dot (cadr (car statement)) environment currType instance)) environment)])
-     ;  the closure of the class this method is stored in (class-name instance)
-     (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
-      (let ([val (interpret-statement-list (get-closure-body funcClosure)
-                                           ; new state with formal / actual parameters ADDED to state with function & class clsoures
-                                             (cons (globalEnvironment environment)
+   
+  ;  (let ([newCurrType (get-closure-className (dot (cadr (car statement)) environment currType instance))])
+      (let ([classClosure (lookup (class-name (dot (cadr (car statement)) environment currType instance)) environment)])
+        ; updates the current type if using super of instance
+        (let ([newCurrType (get-closure-className classClosure)])
+        ;  the closure of the class this method is stored in (class-name instance)
+        (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
+         
+          (let ([val (interpret-statement-list (get-closure-body funcClosure)
+                                               ; new state with formal / actual parameters ADDED to state with function & class clsoures
+                                               (cons (globalEnvironment environment)
 
-                                                         (add-frame (bind-parameters (get-closure-params funcClosure)
-                                                                       (cons (cadr (car statement)) (cdr statement))
-                                                                       environment currType instance)
-                                                      ; env with function closure, and global  class closures
+                                                     (add-frame (bind-parameters (get-closure-params funcClosure)
+                                                                                 ; to add the current Type and bind it to this 
+                                                                                 (cons (determine-name (cadr (car statement)) environment newCurrType instance)
+                                                                                       (cdr statement))
+                                                                                 environment newCurrType instance)
+                                                                ; env with function closure, and global  class closures
                                                     
-                                                                 (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
-                                                      )
-                                           currType instance
-                                           (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
-                                           (lambda (v env) (throw v environment)) (lambda (env) env))])
-        (if willReturn
-            val
-            (next (pop-frame environment))))))))
+                                                                (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
+                                                     )
+                                              newCurrType instance
+                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
+                                               (lambda (v env) (throw v environment)) (lambda (env) env))])
+    
+            (if willReturn
+                val
+                (next (pop-frame environment)))))))))
+
+(define determine-name
+  (lambda (name environment currType instance)
+    (println "determining name")
+    (println name)
+    (println currType)
+    (cond
+      ; if '(dot...)
+      ((list? name)    (eval-expression name environment currType instance))
+      ; if 'super, retunr the class name of the super
+      ((eq? name 'super) (instantiate (get-closure-className (lookup currType environment)) environment))
+      (else name))))
+  
 
 ; to call the specified class's main method at the end of interpreting
 (define call-main
@@ -240,16 +263,11 @@
 (define dot
   (lambda (instanceName environment currType instance)
     ; HAVE TO EAL INSTANCE NAME WHEN INSTANCENAME = New A()
-   ; (println (lookup (get-instance-name instance) environment))
-   ; (println "i am stupid")
-   ; (println environment)
-   ; (println instanceName)
-   ; (println (get-instance-name instance))
     (cond
       ; will instantiate if running New A().
       ((list? instanceName) (eval-expression instanceName environment currType instance))
       ; if accessing the super
-      ;((eq? 'super instanceName) (lookup (get-instance-name instance) environment))
+      ((eq? 'super instanceName)  (instantiate (class-name (lookup currType environment)) environment))
       ((exists? instanceName environment) (lookup instanceName environment))
       (
                             
@@ -360,12 +378,19 @@
 ; Evaluates all possible boolean and arithmetic expressions, including constants, variables, and function calls
 (define eval-expression
   (lambda (expr environment currType instance)
+    (println "evaluating")
+    (println instance)
+    (println currType)
+    (println expr)
+    (print environment)
     (cond
       ((number? expr) expr)
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
       ((not (list? expr)) (lookup expr environment))
       ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment currType instance (lambda (v) v) (lambda (v) v) #t))
+      ; if the expression is an instance : probably better way to do this but im dying 
+      ((exists? (class-name expr) environment)  expr)
       (else (eval-operator expr environment currType instance)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
@@ -481,6 +506,7 @@
 (define get-closure-super operator)
 (define get-closure-fieldsList caadr)
 (define get-closure-methodsList caaddr)
+(define get-closure-className cadddr)
 
 (define get-instance-fieldsList operand1)
 (define get-instance-name operator)
@@ -650,7 +676,7 @@
   (lambda (formal actual environment currType instance)
     (if (eq? (length actual) (length formal))
         (bind-parameters-helper formal actual (newenvironment) environment currType instance)
-        (myerror "Mismatched parameters and argiments."))))
+        (myerror "Mismatched parameters and arguments."))))
 
 (define bind-parameters-helper
   (lambda (formal actual frame environment currType instance)
