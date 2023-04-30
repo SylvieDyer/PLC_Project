@@ -119,14 +119,17 @@
 
 ; to search for a function & its closure through classes
 (define function-search
-  (lambda (classClosure funcName environment)
+  (lambda (classClosure funcName environment return)
+;    (println "function search")
+;    (println classClosure)
+ ;  (println funcName)
     (cond
       ; if the function has not been found, not declared
-      ((null? classClosure)      (myerror "Function undefined: " funcName))
+      ((null? classClosure)      (return (myerror "Function undefined: " funcName) 'NULL))
       ; check if it exists in the current class closure
-      ((exists-in-list? funcName (car (get-closure-methodsList classClosure)) )   (lookup-in-frame funcName (get-closure-methodsList classClosure)))
+      ((exists-in-list? funcName (car (get-closure-methodsList classClosure)) )   (return (lookup-in-frame funcName (get-closure-methodsList classClosure)) (get-closure-className classClosure)))
       ; otherwise, check the closure of the super class
-      (else                                                            (function-search (lookup-in-frame (get-closure-super classClosure) (globalEnvironment environment)) funcName environment)))))
+      (else                                                            (function-search (lookup-in-frame (get-closure-super classClosure) (globalEnvironment environment)) funcName environment (lambda (funcClosure containingClass) (return funcClosure containingClass)))))))
 
 
 ; to handle when a function is called
@@ -138,35 +141,74 @@
     ; get the instance using dot, and save it
     ; then get the class closure to get the function stuff
 
+  ;  (println "Function call")
+  ;  (print "current type: ") (println currType)
+  ;;  (print "instance (try type: ") (println instance)
+  ;  (print "instance calling function: ") (println (cadr (car statement)))
+  ;  (println environment)
+  ;  (println (globalEnvironment environment))
+  ;  (println (get-instance-name instance))
+
+    ; this. method() --> find this instance, look at its runtime type, get class closure for that type
+    ; this.var --> look at instance variable....
+
+    
+    (function-search (lookup-class-closure (get-instance-name (dot (cadr (car statement)) environment currType instance)) environment currType instance)
+                     (caddr (car statement)) ;function name 
+                     environment
+                     (lambda (funcClosure containingClass)
+                     ;  (println (get-closure-body funcClosure))
+                       (let ([val (interpret-statement-list (get-closure-body funcClosure)
+                                                            ; new state with bounded formal / actual params to function state WITH globalEnv
+                                                            (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
+                                                                                                   ; bind the instance calling the method to 'this'
+                                                                                                   (cons instance
+                                                                                                         (cdr statement))
+                                                                                                   environment currType instance)
+                                                                                  ; env with function closure, and global  class closures
+                                                                                  (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
+                                                                       (cons (globalEnvironment environment) '()))
+                                                            containingClass
+                                                            instance ;is not updated ... is the true type (?)
+                                                            (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
+                                                            (lambda (v env) (throw v environment)) (lambda (env) env))])
+                         (if willReturn
+                             val
+                             (next (pop-frame environment))))))))
+
+       
+                                                                                                           
+
+
+    
     ; get the instance the method is being called from
-    (let ([instanceClosure (dot (cadr (car statement)) environment currType instance)])
+  ;  (let ([instanceClosure (dot (cadr (car statement)) environment currType instance)])
     
       ; the class closure the method is being called from 
-      (let ([classClosure (lookup-class-closure (get-instance-name instanceClosure) environment currType instance)])
+  ;    (let ([classClosure (lookup-class-closure (get-instance-name instanceClosure) environment currType instance)])
         ; the function's closure
-        (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
-          (let ([val (interpret-statement-list (get-closure-body funcClosure)
+  ;      (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
+  ;        (let ([val (interpret-statement-list (get-closure-body funcClosure)
                                                ; new state with bounded formal / actual params to function state WITH globalEnv
-                                               (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
-                                                                                 ; bind the instance calling the method to 'this'
-                                                                                 (cons instanceClosure
-                                                                                       (cdr statement))
-                                                                                 environment (get-closure-className classClosure) instance)
-                                                                ; env with function closure, and global  class closures
-                                                                (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
-                                                     (cons (globalEnvironment environment) '()))
-                                               (get-closure-className classClosure)
-                                               instanceClosure ;is not updated ... is the true type (?)
-                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
-                                               (lambda (v env) (throw v environment)) (lambda (env) env))])
-            (if willReturn
-                val
-                (next (pop-frame environment)))))))))
+ ;;                                              (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
+ ;;                                                                                ; bind the instance calling the method to 'this'
+ ;                                                                                (cons instanceClosure
+ ;                                                                                      (cdr statement))
+  ;                                                                               environment (get-closure-className classClosure) instance)
+  ;                                                              ; env with function closure, and global  class closures
+  ;                                                              (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
+  ;                                                   (cons (globalEnvironment environment) '()))
+  ;                                             (get-closure-className classClosure)
+  ;                                             instance ;is not updated ... is the true type (?)
+  ;                                             (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
+  ;                                             (lambda (v env) (throw v environment)) (lambda (env) env))])
+   ;         (if willReturn
+        ;        val
+        ;        (next (pop-frame environment)))))))))
 
 ; the dot operator : returns an INSTANCE closure 
 (define dot
   (lambda (instanceName environment currType instance)
-    
     (cond
       ; will instantiate if running new A
       ((list? instanceName)               (instantiate (cadr instanceName) environment))
@@ -184,9 +226,9 @@
   (lambda (name environment currType instance)
     (cond
       ; if calling the super class, get the currentType's closure to find the parent's closure
-      ((eq? name 'super)  (lookup (get-closure-className (lookup name (globalEnvironment environment)))))
+      ((eq? name 'super)  (lookup (get-closure-super (lookup (get-instance-name instance) (globalEnvironment environment)))))
       ; if calling super instance
-      ((eq? name 'this)   (class-name instance))
+      ((eq? name 'this)   (lookup (class-name instance) (globalEnvironment environment)))
       ; otherwise the name is an existing instance, just look up 
       (else               (lookup-in-frame name (globalEnvironment environment)))
       )))
@@ -203,9 +245,9 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment currType instance return break continue throw next)
- ;   (println "interpret statement: ")
- ;   (println statement)
- ;   (println environment)
+;    (println "interpret statement: ")
+;    (println statement)
+;    (println environment)
     (cond
       ; if at main function, want to run automatically
     ;  ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) currType instance return break continue throw next))
@@ -468,7 +510,7 @@
   (lambda (class-binding)
     (unbox (caadr class-binding))))
 
-; get the closure of a clas 
+; get the closure of a class
 (define get-closure-of
   (lambda (classname environment)
     (lookup classname environment)))
@@ -701,13 +743,19 @@
 ; looks up a variable without a .
 (define lookup-var-env
   (lambda (var environment currType instance)
+  ;  (println "lookup in env")
+  ;  (println var)
+  ;  (println environment)
+  ;  (println (exists? var environment))
+  ;  (println currType)
+    
     (cond
       ; check the environment first (function params, etc)
       ((exists? var environment)       (lookup var environment))
   ; then check the current instance
   ; ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
       ; check the currentType first
-      (else                        (lookup-var-helper var environment (get-class-closure currType environment)))
+      (else                        (lookup-var-helper var environment (get-class-closure currType (globalEnvironment environment)) #t))
       )))
 
 ; looks up a variable with a . (search the instance first)
@@ -717,55 +765,25 @@
       ; search instance fields first
       ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
      ; WILL NEED TO SEARCH PARENTS (lookup-var-helper) THEN THE ENVIRONMENT?
-      
       ; then search the environment
-      (else (lookup var environment)))))
-
-
-
-  ;  (let ([valueFound (lookup-var-helper var environment (get-class-closure currType (globalEnvironment environment)))])
- ;    (cond
-  ;    ((not (eq? valueFound 'NOTFOUND))     valueFound)
-      ; if the value wasn't found in the parent classes, search the current instance (TODO: CORRCT?)
-  ;    ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
-  ;    ; then search the environment
-  ;    (else (lookup var environment))))))
-
-; looksup a variable 
-(define lookup-var
-  (lambda (var environment currType instance isDot)
-    
-    
-  ;; (println currType)
-   ; (println (get-super-className currType environment))
-   ; (println "?")
-
-; first want to look in the loal environment (params to a function, etc.)
-    ; then wan tto look at this,
-    ; then want to llok at parents 
-    
-    (cond
-      ; not sure if its supposed to be top frame here TODO:
-   ;   ((exists? var (topframe environment)) (begin (println "IN HERE FUCKER") (lookup var (topframe environment))))
-      ((exists? var environment)                                             (lookup var environment))
-     ; ((exists? var environment) (lookup var environment))
-      ; if the var exists in the current instance 
-      ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
-      ; if there is no parent
-      ((null? (get-super-className currType environment))                   (myerror "Variable undefined: " var))
-      ; otherwise search parent classes
-      (else                                      (lookup-var-helper var environment (get-class-closure (get-super-className currType environment) environment))))))
-   
+      (else (lookup-var-helper var environment (get-class-closure (get-instance-name instance) (globalEnvironment environment)) #f)))))
+ 
 ; helper to lookup a var in a class closure (and upwards to parent classes)
 (define lookup-var-helper
-  (lambda (var environment classClosure)
+  (lambda (var environment classClosure searchedEnv)
+  ;  (println "in helper")
+  ;  (println var)
+  ;  (println classClosure)
+  ;  (println environment)
     (cond
       ; check if the var exists in the current class' fields lsit
       ((exists? var (cons (get-closure-fieldsList classClosure) '()))    (lookup-in-frame var (get-closure-fieldsList classClosure)))
-      ; if not, is there a super class to search?
-      ((null? (get-closure-super classClosure))               'NOTFOUND)
+      ; if no super to search, see if we've checked environment already 
+      ((null? (get-closure-super classClosure))               (if searchedEnv
+                                                                  'NOTFOUND
+                                                                   (lookup var environment)))
       ; otherwise, search parent class
-      (else                                                   (lookup-var-helper var environment (get-class-closure (get-closure-super classClosure) environment)))
+      (else                                                   (lookup-var-helper var environment (get-class-closure (get-closure-super classClosure) (globalEnvironment environment)) searchedEnv))
       )))
     
 
