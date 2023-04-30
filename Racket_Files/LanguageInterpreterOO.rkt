@@ -1,24 +1,197 @@
-; Imperitive Language Interpreter Project
-; Luis Torres & Sylvie Dyer
-; Based on Professor Connamacher's Language Interpreter, CPS Version
 #lang racket
 (require "classParser.rkt")
 (provide (all-defined-out))
 
-; An interpreter for the simple language using tail recursion for the M_state functions and does not handle side effects.
-
-; The functions that start interpret-...  all return the current environment.  These are the M_state functions.
-; The functions that start eval-...  all return a value.  These are the M_value and M_boolean functions.
-
-; The main function.  Calls parser to get the parse tree and interprets it with a new environment.  Sets default continuations for return, break, continue, throw, and "next statement"
+; interprets a file & runs the main method of a given class
 (define interpret
-  (lambda (file)
+  (lambda (file classname)
     (scheme->language
-     (call/cc (lambda (k)
-     (interpret-statement-list (parser file) (newenvironment) k
-                               (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop"))
-                               (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) (println "return") (println env) env))))) ))
+     (interpret-list (parser file) (newenvironment) (lambda (globalEnv)
+                                                      ; call the main method of the specified class name
+                                                      (call-main classname globalEnv))))))
 
+; to call the specified class's main method at the end of interpreting
+(define call-main
+  (lambda (classname globalEnv)
+    ; the closure of the given class : lookup classname globalEnv
+    ; the methods list : get-closure-methodsList (lookup clasname globalEnv)
+    ; the main method closure : lookup 'main ^^
+    (let ([main-closure (lookup-in-frame 'main (get-closure-methodsList (lookup classname globalEnv)))])
+      (interpret-statement-list (get-closure-body main-closure)
+                                ; not sure which env this is, but all i know is there are no parameters to bind so we add a frame (also wont recursively call main i dont think )
+                                (add-frame (newenvironment) globalEnv)
+                                classname (instantiate classname globalEnv)
+                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop")) (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))))
+
+; go through the list of class declarations
+(define interpret-list
+  (lambda (class-list globalEnvironment next)
+    (if (null? class-list)
+        (next globalEnvironment)
+        (interpret-class (cdar class-list) globalEnvironment (lambda (newEnv) (interpret-list (cdr class-list) newEnv next))))))
+
+; interpret the class definition
+(define interpret-class
+  (lambda (classDefinition globalEnvironment next)
+    ; if there is a super class
+    (if (extends? classDefinition)
+        (build-class-closure (class-dec classDefinition)
+                             (super-name classDefinition)
+                             (newenvironment)
+                             (newenvironment)
+                             (class-name classDefinition)
+                             (lambda (s f m)
+                               (make-class-closure (class-name classDefinition) s f m globalEnvironment next)))
+        (build-class-closure (class-dec classDefinition)
+                             '()
+                             (newenvironment)
+                             (newenvironment)
+                             (class-name classDefinition)
+                             (lambda (s f m)
+                               (make-class-closure (class-name classDefinition) s f m globalEnvironment next))))))
+                             
+
+; recursively build the elements of the class closure
+(define build-class-closure
+  (lambda (classDefinitionList super fieldsList methodsList classname classNext)
+    (if (null? classDefinitionList)
+        (classNext super fieldsList methodsList)
+        (build-closure-helper (car classDefinitionList) super fieldsList methodsList classname (lambda (s f m) (build-class-closure (cdr classDefinitionList) s f m classname classNext))))))
+
+; helper to build the class closure
+(define build-closure-helper
+  (lambda (statement super fieldsList methodsList classname classNext)
+    (cond
+      ((eq? 'var (statement-type statement))                    (class-declare statement super fieldsList methodsList classname classNext))
+      ((eq? 'static-function (statement-type statement))        (interpret-function (cdr statement) super fieldsList methodsList classNext #t))
+      ((eq? 'function (statement-type statement))               (interpret-function (cdr statement) super fieldsList methodsList classNext #f)))))
+
+; takest the components needed and makes the actual closure
+(define make-class-closure
+  (lambda (className superClass fieldsList methodsList globalEnvironment next)
+    ; binds the class name to the closure (which includes the class name atm (change? TODO:)
+    (next (insert className (cons superClass (cons fieldsList (cons methodsList  (cons className '())))) globalEnvironment))))
+
+; creates an instance
+(define instantiate
+  (lambda (classname environment)
+    (cons classname (cons (instantiate-fields-list (get-closure-fieldsList (lookup classname environment)) classname) '()))))
+
+
+; to unbox fields in class closure, and initialize them
+(define instantiate-fields-list
+  (lambda (fieldsList currType)
+    (instantiate-FL-helper (variables fieldsList) (store fieldsList) currType (newframe) (lambda (newFieldsList) newFieldsList))))
+
+
+; helper to instantiate fields list
+(define instantiate-FL-helper
+  (lambda (varLis valLis currType newFieldsList return)
+    (if (null? varLis)
+        (return newFieldsList)
+        (instantiate-FL-helper (cdr varLis) (cdr valLis) currType newFieldsList (lambda (newFieldsList2)
+                                                                                (return
+                                                                                 ; add the value, evaluated value to the fieldsList
+                                                                                 (add-to-frame (car varLis)
+                                                                                               (eval-expression (unbox (car valLis))
+                                                                                                                newFieldsList2
+                                                                                                                currType
+                                                                                                                '()  ; what is instance ?
+                                                                                                                )
+                                                                                               newFieldsList2
+                                                                                               )))))))
+; Adds a new variable binding to the environment.  There may be an assignment with the variable
+(define class-declare
+  (lambda (statement super fieldsList methodsList classname classNext)
+    (if (exists-declare-value? statement)
+        (classNext super (insert (get-declare-var statement) (eval-expression (get-declare-value statement) classname '() fieldsList) fieldsList) methodsList)
+        (classNext super (insert (get-declare-var statement) 'novalue fieldsList) methodsList))))
+
+
+; To declare a function in the class closure
+(define interpret-function
+  (lambda (statement super fieldsList methodsList classNext isStatic)
+    ; check if the method is static
+    (if isStatic
+         ; if static, "this" is added to the function's parameter list 
+        (classNext super fieldsList (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) fieldsList super) methodsList))
+        (classNext super fieldsList (insert (get-function-name statement) (make-closure (cons 'this (get-function-params statement)) (get-function-body statement) fieldsList super) methodsList)))))
+
+; to search for a function & its closure through classes
+(define function-search
+  (lambda (classClosure funcName environment)
+    (cond
+      ; if the function has not been found, not declared
+      ((null? classClosure)      (myerror "Function undefined: " funcName))
+      ; check if it exists in the current class closure
+      ((exists-in-list? funcName (car (get-closure-methodsList classClosure)) )   (lookup-in-frame funcName (get-closure-methodsList classClosure)))
+      ; otherwise, check the closure of the super class
+      (else                                                            (function-search (lookup (get-closure-super classClosure) environment) funcName environment)))))
+
+
+; to handle when a function is called
+(define interpret-function-call
+  (lambda (statement environment currType instance throw next willReturn)
+    ; statement: '((dot instanceName functionName) params)
+    ; instanceName: (cadr (car statement))
+    ; functionName: (caddr (car statement))
+    ; get the instance using dot, and save it
+    ; then get the class closure to get the function stuff
+
+    ; get the instance the method is being called from
+    (let ([instanceClosure (dot (cadr (car statement)) environment currType instance)])
+    
+      ; the class closure the method is being called from 
+      (let ([classClosure (lookup-class-closure (class-name instanceClosure) environment currType instance)])
+        ; the function's closure
+        (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
+          (let ([val (interpret-statement-list (get-closure-body funcClosure)
+                                               ; new state with bounded formal / actual params to function state WITH globalEnv
+                                               (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
+                                                                                 ; bind the instance calling the method to 'this'
+                                                                                 (cons instanceClosure
+                                                                                       (cdr statement))
+                                                                                 environment (get-closure-className classClosure) instance)
+                                                                ; env with function closure, and global  class closures
+                                                                (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
+                                                     (cons (globalEnvironment environment) '()))
+                                               (get-closure-className classClosure)
+                                               instance ;is not updated ... is the true type (?)
+                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
+                                               (lambda (v env) (throw v environment)) (lambda (env) env))])
+            (if willReturn
+                val
+                (next (pop-frame environment)))))))))
+
+; the dot operator : returns an INSTANCE closure 
+(define dot
+  (lambda (instanceName environment currType instance)
+    (cond
+      ; will instantiate if running new A
+      ((list? instanceName)               (instantiate (cadr instanceName) environment))
+      ; if accessing the super: return an instance of the super 
+      ((eq? 'super instanceName)          (instantiate (class-name (lookup-in-frame currType (globalEnvironment environment))) environment))
+      ; if accessing this, just return the instance (TODO: ???)
+      ((eq? 'this instanceName)           instance)
+      ; otherwise, want to look up the var in the local env THEN non-static fields
+      ((exists? instanceName environment) (lookup instanceName environment))
+      ; otherwise, doesn't exist (TODO: might not need this because we check exists above?)
+      (else                               (myerror "Instance does not exist: " instanceName)))))
+
+; helper function to get a class closure
+(define lookup-class-closure
+  (lambda (name environment currType instance)
+    (cond
+      ; if calling the super class, get the currentType's closure to find the parent's closure
+      ((eq? name 'super)  (lookup (get-closure-className (lookup name (globalEnvironment environment)))))
+      ; if calling super instance
+      ((eq? name 'this)   (class-name instance))
+      ; otherwise the name is an existing instance, just look up 
+      (else               (lookup-in-frame name (globalEnvironment environment)))
+      )))
+
+; -----------------CLASSIC INTERPRET METHODS----------------------------------
+; ----------------------------------------------------------------------------
 ; interprets a list of statements.  The state/environment from each statement is used for the next ones.
 (define interpret-statement-list
   (lambda (statement-list environment currType instance return break continue throw next)
@@ -29,16 +202,9 @@
 ; interpret a statement in the environment with continuations for return, break, continue, throw, and "next statement"
 (define interpret-statement
   (lambda (statement environment currType instance return break continue throw next)
-    (println "INTERPRET STATEMENT")
-    (println statement)
-    (println instance)
-    (println currType)
-   ; (println "")
-   ;; (println environment)
-   ; (println "")
     (cond
       ; if at main function, want to run automatically
-      ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) currType instance return break continue throw next))
+    ;  ((eq? 'main (main-func? statement)) (interpret-statement-list (main-body statement) (push-frame environment) currType instance return break continue throw next))
      ; ((eq? 'class (statement-type statement))    (interpret-class (cdr statement) environment next))
      ;? don't need anymore? ((eq? 'function (statement-type statement)) (interpret-function (cdr statement) currType environment next))
       ((eq? 'funcall (statement-type statement))  (interpret-function-call (cdr statement) (push-frame environment) currType instance throw next #f))
@@ -55,278 +221,9 @@
       (else (myerror "Unknown statement:"         (statement-type statement))))
     ))
 
-; -------------------- NEW TOP LEVEL STUFF FOR THE GLOBAL ENV STORING CLASSES ------------
-; WILL WANT OT RENAME OR DELETE BUT I WAS TOO SCARED SO WE'LL DEAL
-(define NEWINTERPRET
-  (lambda (file classname)
-    (scheme->language
-              (INTERPRET-LIST (parser file) (newenvironment) (lambda (globalEnv)
-                                                               ;(println "global env")(println globalEnv)
-                                                               (call-main classname globalEnv))))))
-
-(define INTERPRET-LIST
-  (lambda (class-list globalEnvironment next)
-    (println "BITCH")
-    (println (car class-list))
-    (println (cdar class-list))
-    (if (null? class-list)
-        (next globalEnvironment)
-        (interpret-classes (car class-list) globalEnvironment (lambda (newEnv) (INTERPRET-LIST (cdr class-list) newEnv next))))))
-
-; each statement in the list is a class (not the conditional as in interpret-statement)
-(define interpret-classes
-  (lambda (class globalEnvironment next)
-    (interpret-class (cdr class) globalEnvironment next)))
-
-; Recursively builds the elements of the class' closure 
-(define build-class-closure
-  (lambda (classDefinitionList super fieldsList methodsList classname classNext)
-    (if (null? classDefinitionList)
-        (classNext super fieldsList methodsList)
-        (add-to-class-closure (car classDefinitionList) super fieldsList methodsList classname (lambda (s f m) (build-class-closure (cdr classDefinitionList) s f m classname classNext))))))
-
-; building the class closure ^ called by build (maybe will be the same as interpret statement TODO:
-(define add-to-class-closure
-  (lambda (statement super fieldsList methodsList classname classNext)
-    (cond
-      ((eq? 'var (statement-type statement))                    (class-declare statement super fieldsList methodsList classname classNext))
-      ((eq? 'static-function (statement-type statement))        (interpret-function (cdr statement) super fieldsList methodsList classNext #t))
-      ; the below will need to add "this" to the parameter list (because it is not static!
-      ((eq? 'function (statement-type statement))               (interpret-function (cdr statement) super fieldsList methodsList classNext #f))
-      )))
-
-
-; To build the class closure
-(define interpret-class
-  (lambda (classDefinition globalEnvironment next)
-    ; if there is a super class
-    (if (extends? classDefinition)
-        (build-class-closure (class-dec classDefinition)
-                             (super-name classDefinition)
-                             (newenvironment)
-                             (newenvironment)
-                             (class-name classDefinition)
-                             (lambda (s f m)
-                               (make-class-closure (class-name classDefinition) s f m globalEnvironment next)))
-                                                                                                                         
-        ; otherwise, use this class for the parent [TODO: MAY BE SOMETHING ELSE FOR NAME]
-        (build-class-closure (class-dec classDefinition)
-                             (class-name classDefinition)
-                             (newenvironment)
-                             (newenvironment)
-                             (class-name classDefinition)
-                             
-                             (lambda (s f m)
-                               (make-class-closure (class-name classDefinition) s f m globalEnvironment next))))))
-
-; takes the elements and makes the closure [FINAL BUILD METHOD]
-(define make-class-closure
-  (lambda (className superClass fieldsList methodsList globalEnvironment next)
-    (next (insert className (cons superClass (cons fieldsList (cons methodsList (cons className '())))) globalEnvironment))))
-
-; handling new, creating an instance 
-(define instantiate
-  (lambda (classname environment)
-    ; (println "instantiating")
-    ;(println classname)
-   ; (println (instantiateFieldsList (get-closure-fieldsList (lookup classname environment)) classname))
-    ; runtime type: classname
-    (cons classname (cons (instantiateFieldsList (get-closure-fieldsList (lookup classname environment)) classname) '()))))
-
-; to unbox the fields in the class closure, and initialize those values
-(define instantiateFieldsList
-  (lambda (fieldsList currType)
-    (println "instantiate fields list : ") (println fieldsList)
-    (instantiateFLHelper (variables fieldsList) (store fieldsList) currType (newframe) (lambda (newFieldsList) (println "new fieldsList") (println newFieldsList)newFieldsList))))
-
-(define instantiateFLHelper
-  (lambda (varLis valLis currType newFieldsList return)
-    (if (null? varLis)
-        (return newFieldsList)
-        (instantiateFLHelper (cdr varLis) (cdr valLis) currType newFieldsList (lambda (newFieldsList2)
-                                                                                (print "newFieldsList2: ") (println newFieldsList2)
-                                                                                (print "the value to be evaluated: ") (println (unbox (car valLis)))
-                                                                               
-                                                                                (return
-                                                                                 (add-to-frame (car varLis)
-                                                                                               (eval-expression (unbox (car valLis))
-                                                                                                                newFieldsList2
-                                                                                                                currType
-                                                                                                                '()  ; what is instance ?
-                                                                                                                )
-                                                                                               newFieldsList2
-                                                                                               )))))))
-                                                                                
-                                                                                
-
-
-; Adds a new variable binding to the environment.  There may be an assignment with the variable
-(define class-declare
-  (lambda (statement super fieldsList methodsList classname classNext)
-    (if (exists-declare-value? statement)
-        (classNext super (insert (get-declare-var statement) (eval-expression (get-declare-value statement) classname '() fieldsList) fieldsList) methodsList)
-        (classNext super (insert (get-declare-var statement) 'novalue fieldsList) methodsList))))
-
-; assigns a field name to an expression to compute its value
-; THINK THIS WAS WASTE OF TIME, ISNT ACTUALLY CALLED RN
-(define class-assign
-  (lambda (statement super fieldsList methodsList classNext)
-    ; match instance field name with expression to compute initial value
-    (update (get-assign-lhs statement) (get-assign-rhs statement) fieldsList)
-    (classNext super fieldsList methodsList)))
-
-
-; Calls the function continuation
-(define interpret-function
-  (lambda (statement super fieldsList methodsList classNext isStatic)
-   
-    ; continue on, after binding the closure to the function's name
-    (if isStatic
-        ; if static, "this" is added to the function's parameter list 
-        (classNext super fieldsList (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) fieldsList super) methodsList))
-        (classNext super fieldsList (insert (get-function-name statement) (make-closure (cons 'this (get-function-params statement)) (get-function-body statement) fieldsList super) methodsList)))))
-
-
-        ; have env as the methods list? for some reason? maybe there was a reason
-        ;(classNext super fieldsList (insert (get-function-name statement) (make-closure (get-function-params statement) (get-function-body statement) methodsList super) methodsList))
-       ; (classNext super fieldsList (insert (get-function-name statement) (make-closure (cons 'this (get-function-params statement)) (get-function-body statement) methodsList super) methodsList)))))
-
-; to seach for a function and return its closure if it exists
-(define function-search
-  (lambda (closure funcName environment)
-  ;  (println (get-closure-methodsList closure))
-   ; (println (exists-in-list? funcName  (car (get-closure-methodsList closure))))
-    (cond
-      ((null? closure)                                                 (myerror "Function undefined: " funcName))
-      ((exists-in-list? funcName (car (get-closure-methodsList closure)) )   (lookup-in-frame funcName (get-closure-methodsList closure)))
-      (else                                                            (function-search (lookup (get-closure-super closure) environment) funcName environment)))))
-
-  
-; to handle when a function was called
-(define interpret-function-call
-  (lambda (statement environment currType instance throw next willReturn)
-   ; (println environment)
-    ; FOR ABSTRACTIONS LATER TODO:
-    ; statement: '((dot instanceName functionName) params)
-    ; instanceName: (cadr (car statement))
-    ; functionName: (caddr (car statement))
-  ;  (println statement)
-    (println "")
-    (println "interpret functionc all")
-   ; (println (cadr (car statement)))
-   ; (println (determine-name (cadr (car statement)) environment currType instance))
-    ;(println (dot (cadr (car statement)) environment currType instance))
-    ;(println (class-name (dot (cadr (car statement)) environment currType instance)))
- ;   (println "^ the class name being looked up")
-  ;  (let ([newCurrType (get-closure-className (dot (cadr (car statement)) environment currType instance))])
-      (let ([classClosure (lookup (class-name (dot (determine-name (cadr (car statement)) environment currType instance) environment currType instance)) environment)])
-        ; updates the current type if using super of instance
-        (let ([newCurrType (get-closure-className classClosure)])
-        ;  the closure of the class this method is stored in (class-name instance)
-          (print "NEW CURRENT TYPE:" ) (println newCurrType)
-        (let ([funcClosure (function-search classClosure (caddr (car statement)) environment)])
-         
-          (let ([val (interpret-statement-list (get-closure-body funcClosure)
-                                               ; new state with formal / actual parameters ADDED to state with function & class clsoures
-                                               (cons 
-
-                                                     (add-frame (bind-parameters (get-closure-params funcClosure)
-                                                                                 ; to add the current Type and bind it to this 
-                                                                                 (cons (determine-name (cadr (car statement)) environment newCurrType instance)
-                                                                                       (cdr statement))
-                                                                                 environment newCurrType instance)
-                                                                ; env with function closure, and global  class closures
-                                                    
-                                                                (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
-                                                     (cons (globalEnvironment environment) '())
-                                                     )
-                                              newCurrType instance
-                                               (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
-                                               (lambda (v env) (throw v environment)) (lambda (env) env))])
-            (print "found val:") (println val)
-    
-            (if willReturn
-                val
-                (next (pop-frame environment)))))))))
-
-(define determine-name
-  (lambda (name environment currType instance)
-    (println "determining name")
-    (println name)
-    (println currType)
-    (println environment)
-    (println instance)
-   ; (println "closure of currtype's class")
-   ; (println (globalEnvironment environment)
-  ;;           )
-    (println currType)
-   ;; (println (lookup-currType (globalEnvironment environment)))
-   
-   ; (println (lookup currType (globalEnvironment environment)))
-    (cond
-      ; if '(dot...) or '(new C)
-      ((list? name)    (eval-expression name environment currType instance))
-      ; if 'super, retunr the class name of the super
-    ;  ((eq? name 'super) (instantiate (get-closure-className (lookup 'this environment)) environment))
-      ((eq? name 'super)
-       (begin
-         (println "found super call")
-         (print "current type: ") (println currType)
-         (print "instance: ") (println instance)
-         (print "global :") (println (globalEnvironment environment))
-         (print "env :") (println environment)
-        ; (print "finding the closure of current type: ") (println (lookup-in-frame currType (globalEnvironment environment)))
-         (print "the super is: ") (println (get-closure-super (lookup-in-frame currType (globalEnvironment environment))) )
-
-
-       (instantiate (get-closure-super (lookup-in-frame currType (globalEnvironment environment))) environment))
-       )
-      (else name))))
-  
-
-; to call the specified class's main method at the end of interpreting
-(define call-main
-  (lambda (classname globalEnv)
-    ; the closure of the given class : lookup classname globalEnv
-    ; the methods list : get-closure-methodsList (lookup clasname globalEnv)
-    ; the main method closure : lookup 'main ^^
-    (let ([main-closure (lookup-in-frame 'main (get-closure-methodsList (lookup classname globalEnv)))])
-      (interpret-statement-list (get-closure-body main-closure)
-                                ;not sure which env this is, but all i know is there are no parameters to bind so we add a frame (also wont recursively call main i dont think )
-                                (add-frame (newenvironment) globalEnv)
-                                classname (instantiate classname globalEnv)
-                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror "Continue used outside of loop")) (lambda (v env) (myerror "Uncaught exception thrown")) (lambda (env) env)))))
-
-; dot operator to return the closure of the instance next to a dot
-(define dot
-  (lambda (instanceName environment currType instance)
-    (println "hello dot")
-    (print "instanceName: ") (println instanceName)
-    (print "env: ") (println environment)
-    (print "current type: ") (println currType)
-    (print "instance: ") (println instance)
-    ; HAVE TO EAL INSTANCE NAME WHEN INSTANCENAME = New A()
-    (cond
-      ; will instantiate if running New A().
-      ((list? instanceName) (eval-expression instanceName environment currType instance))
-      ; if accessing the super
-      ((eq? 'super instanceName)  (instantiate (class-name (lookup currType environment)) environment))
-      ; if accessing this, will want to see if currType = instanceType, and if not ?? (diff for methods vs var? doign for methods rn)
-      ((eq? 'this instanceName) instance)
-      ((exists? instanceName environment) (lookup instanceName environment))
-      (else
-                            
-   ; (if (exists? instanceName environment)
-      ;  (lookup instanceName environment)
-        (myerror "Instance does not exist: " instanceName)))))
-
-; ---- end of the suff used for classes lmao 
-
 ; Calls the return continuation with the given expression value
 (define interpret-return
   (lambda (statement environment currType instance return)
-    (println "interpreting return")
-    (println statement)
     (return (eval-expression (get-expr statement) environment currType instance))))
 
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
@@ -343,7 +240,6 @@
         (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance) (cons (get-instance-fieldsList (dot (cadr (get-assign-lhs statement)) environment currType instance) ) '()))))
         (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment)))
         )
-  ;  (println "Updated statemtn")
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
 ; We need to check if there is an else condition.  Otherwise, we evaluate the expression and do the right thing.
@@ -425,30 +321,19 @@
 ; Evaluates all possible boolean and arithmetic expressions, including constants, variables, and function calls
 (define eval-expression
   (lambda (expr environment currType instance)
-    (println "evaluating")
-    (println instance)
-    (println currType)
-    (println expr)
-    (println environment)
-    (println (number? expr))
     (cond
-      ((number? expr) (begin  (println "its a fucking number")expr))
+      ((number? expr) expr)
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
-      ; if accessing this, return the instance (?)
-      ((eq? expr 'this) (instantiate currType environment))
-      ; want to look up in the current instance first (?)
-      ((not (list? expr)) (if (eq? currType (class-name instance))
-                              (lookup expr environment)
-                              (begin
-                                (print "instance feidlds lsit: ") (println (get-instance-fieldsList (instantiate currType environment)))
-                              (lookup-in-frame expr (get-instance-fieldsList (instantiate currType environment))))))
-
-     ;  (lookup expr (get-instance-fieldsList instance)))
-      ((eq? (statement-type expr) 'funcall) (interpret-function-call (cdr expr) environment currType instance (lambda (v) v) (lambda (v) v) #t))
-      ; if the expression is an instance : probably better way to do this but im dying 
+      ; if accessing this, return the current instance
+      ((eq? expr 'this)                         instance)
+      ; if a variable, first look up in instance then look up in each class outward
+      ((not (list? expr))                       (lookup-var expr environment currType instance))
+      ; if a function call, run the function for the value
+      ((eq? (statement-type expr) 'funcall)     (interpret-function-call (cdr expr) environment currType instance (lambda (v) v) (lambda (v) v) #t))
+      ; if the expression is an instance TODO: probably better way to do this but im dying 
       ((exists? (class-name expr) environment)  expr)
-      (else (eval-operator expr environment currType instance)))))
+      (else                                     (eval-operator expr environment currType instance)))))
 
 ; Evaluate a binary (or unary) operator.  Although this is not dealing with side effects, I have the routine evaluate the left operand first and then
 ; pass the result to eval-binary-op2 to evaluate the right operand.  This forces the operands to be evaluated in the proper order in case you choose
@@ -457,7 +342,7 @@
   (lambda (expr environment currType instance)
     (cond
       ((eq? 'new (operator expr)) (instantiate (operand1 expr) environment))
-      ((eq? 'dot (operator expr)) (lookup-in-frame (operand2 expr) (get-instance-fieldsList (dot (operand1 expr) environment currType instance))))
+      ((eq? 'dot (operator expr)) (lookup-var (operand2 expr) environment currType  (dot (operand1 expr) environment currType instance)))
       ((eq? '! (operator expr))   (not (eval-expression (operand1 expr) environment currType instance)))
       ((and (eq? '- (operator expr)) (= 2 (length expr))) (- (eval-expression (operand1 expr) environment currType instance)))
       (else (eval-binary-op2 expr (eval-expression (operand1 expr) environment currType instance) environment currType instance)))))
@@ -489,6 +374,12 @@
         (eq? val1 val2))))
 
 
+
+;---------------------------- HELPERS --------------------------------
+(define get-class-closure
+  (lambda (className environment)
+    (lookup-in-frame className environment)))
+ 
 ;-----------------
 ; HELPER FUNCTIONS
 ;-----------------
@@ -551,7 +442,7 @@
     (not (null? (operand1 classDef)))))
 
 ; gets the closure of a class given its binding: '((name) (closure))
-(define get-class-closure
+(define get-class-closure-from-binding
   (lambda (class-binding)
     (unbox (caadr class-binding))))
 
@@ -574,6 +465,7 @@
   (lambda (catch-statement)
     (car (operand1 catch-statement))))
 
+(define class-body cdr)
 
 ;------------------------
 ; Environment/State Functions
@@ -677,7 +569,6 @@
 ; Changes the binding of a variable to a new value in the environment.  Gives an error if the variable does not exist.
 (define update
   (lambda (var val environment)
- ;   (println environment)
     (if (exists? var environment)
         (update-existing var val environment)
         (myerror "error: variable used but not defined:" var))))
@@ -771,6 +662,46 @@
         (topframe environment)
         (globalHelper (pop-frame environment)))))
 
+; gets the closure of a class' super-class
+(define get-super-className
+  (lambda (className environment)
+   ; (println "the closure:")
+   ; (println (lookup-in-frame className (globalEnvironment environment)))
+    (get-closure-super (lookup-in-frame className (globalEnvironment environment)))))
+ 
+; looksup a variable 
+(define lookup-var
+  (lambda (var environment currType instance)
+  ;; (println currType)
+   ; (println (get-super-className currType environment))
+   ; (println "?")
+    (cond
+      ; not sure if its supposed to be top frame here TODO:
+   ;   ((exists? var (topframe environment)) (begin (println "IN HERE FUCKER") (lookup var (topframe environment))))
+
+     ; ((exists? var environment) (lookup var environment))
+      ; if the var exists in the current instance 
+      ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
+      ; if there is no parent
+      ((null? (get-super-className currType environment))                   (lookup var environment))
+      ; otherwise search parent classes
+      (else                                      (lookup-var-helper var environment (get-class-closure (get-super-className currType environment) environment))))))
+   
+; helper
+(define lookup-var-helper
+  (lambda (var environment classClosure)
+
+    
+    (cond
+      ; check if the var exists in the current class' fields lsit
+      ((exists? var (get-closure-fieldsList classClosure))    (lookup-in-frame var (get-closure-fieldsList classClosure)))
+      ; if not, is there a super class to search?
+      ((null? (get-closure-super classClosure))               (lookup var environment))
+      ; otherwise, search parent class
+      (else                                                   (lookup-var-helper var environment (get-class-closure (get-closure-super classClosure) environment)))
+      )))
+    
+
 
 ; Functions to convert the Scheme #t and #f to our languages true and false, and back.
 
@@ -799,3 +730,4 @@
                             str
                             (makestr (string-append str (string-append " " (symbol->string (car vals)))) (cdr vals))))))
       (error-break (display (string-append str (makestr "" vals)))))))
+
