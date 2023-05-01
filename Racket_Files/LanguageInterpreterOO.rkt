@@ -159,31 +159,43 @@
  ;   (println statement)
  ;   (print "instance :") (println instance)
  ;   (print "currType: ") (println currType)
-   
+
+    ; if calling without a .
+  (let ([instanceCalling (if (list? (car statement))
+                             (cadr (car statement))
+                             'this)])
+    (let ([functionName (if (list? (car statement))
+                        (caddr (car statement))
+                        (car statement))])
     
-    (function-search (lookup-class-closure (get-instance-name (get-instance (cadr (car statement)) environment currType instance)) environment currType instance)
-                     (caddr (car statement)) ;function name 
-                     environment
-                     (lambda (funcClosure containingClass)
-                    ;   (println "returning")
-                     ;  (println (get-closure-body funcClosure))
-                       (let ([val (interpret-statement-list (get-closure-body funcClosure)
-                                                            ; new state with bounded formal / actual params to function state WITH globalEnv
-                                                            (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
-                                                                                                   ; bind the instance calling the method to 'this'
-                                                                                                   (cons instance
-                                                                                                         (cdr statement))
-                                                                                                   environment currType instance)
-                                                                                  ; env with function closure, and global  class closures
-                                                                                  (insert (caddr (car statement)) funcClosure (get-closure-state funcClosure)))
-                                                                       (cons (globalEnvironment environment) '()))
-                                                            containingClass
-                                                            (get-instance (cadr (car statement)) environment currType instance) ;is not updated ... is the true type (?) TODO: MY MAIN PROBLEM,.
-                                                            (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
-                                                            (lambda (v env) (throw v environment)) (lambda (env) env))])
-                         (if willReturn
-                             val
-                             (next  environment)))))))
+        (function-search (lookup-class-closure (get-instance-name (get-instance instanceCalling environment currType instance)) environment currType instance)
+                         functionName
+                         ; (caddr (car statement)) ;function name 
+                         environment
+                         (lambda (funcClosure containingClass)
+                           ;   (println "returning")
+                           ;  (println (get-closure-body funcClosure))
+                           (let ([val (interpret-statement-list (get-closure-body funcClosure)
+                                                                ; new state with bounded formal / actual params to function state WITH globalEnv
+                                                                (add-frame (add-frame (bind-parameters (get-closure-params funcClosure)
+                                                                                                       ; bind the instance calling the method to 'this'
+                                                                                                       (cons instance
+                                                                                                             (cdr statement))
+                                                                                                       environment currType instance)
+                                                                                      ; env with function closure, and global  class closures
+                                                                                      (insert functionName funcClosure (get-closure-state funcClosure)))
+                                                                           (cons (globalEnvironment environment) '()))
+                                                                containingClass
+                                                                (get-instance instanceCalling environment currType instance) ;is not updated ... is the true type (?) TODO: MY MAIN PROBLEM,.
+                                                                (lambda (v) v) (lambda (env) (myerror "Break used outside of loop")) (lambda (env) (myerror"Continue used outside of loop"))
+                                                                (lambda (v env) (throw v environment)) (lambda (env) env))])
+                             (if willReturn
+                                 val
+                                 (next  environment)))))
+)
+
+
+    )))
 
                                                                         
 (define get-instance
@@ -311,18 +323,36 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment currType instance throw next)
-    (println "assigning")
+  ;  (println "assigning")
     (if (list? (get-assign-lhs statement))
-        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance)
+        (updateStatementWithFunctions (get-assign-rhs statement) environment currType instance throw next '() (lambda (s)
+                                                                                        
+                                                                                              ;  (println "returning")
+                                                                                                     ;(println (find-instance (caddr (get-assign-lhs statement)) environment instance))
+                                                                                                (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance)
+                                                                                                                (find-instance (caddr (get-assign-lhs statement)) environment instance)
                                                                                                                 ; ahouls be searching for the instnce to update in 
-                                                                                                                (cons (get-instance-fieldsList (get-instance (cadr (get-assign-lhs statement)) environment currType instance) ) '())
-                                                                                                                )))
-        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment)))
+                                                                                                              ;  (cons (get-instance-fieldsList (get-instance (cadr (get-assign-lhs statement)) environment currType instance) ) '())
+                                                                                                                
+                                                                                                     
+                                                                                                     )))
+        (updateStatementWithFunctions (get-assign-rhs statement) environment currType instance throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment currType instance) (find-instance (get-assign-lhs statement) environment instance))))
         )
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
 
-    
 
+; finds the instance to update in 
+(define find-instance
+  (lambda (var environment instance)
+ ;   (println "find instance")
+  ;  (println var)
+  ;  (println environment)
+ ;   (println (exists-in-list? var (topframe (get-instance-fieldsList instance))))
+    ; check current, then work way up
+    (cond
+      ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (cons (get-instance-fieldsList instance) '()))
+      ((null? (get-closure-super (lookup (get-instance-name instance) environment)) (globalEnvironment environment)) environment)
+      (else                 (find-instance var environment (get-class-closure (get-closure-super (lookup (get-instance-name instance) environment)) (globalEnvironment environment)))))))
     
 ; Updates the environment to add a new binding for a variable
 ;(define interpret-assign
@@ -418,6 +448,7 @@
 ; Evaluates all possible boolean and arithmetic expressions, including constants, variables, and function calls
 (define eval-expression
   (lambda (expr environment currType instance)
+  ;  (println environment)
     (cond
       ((eq? expr 'novalue) 'novalue)
       ((number? expr) expr)
@@ -673,6 +704,11 @@
 ; Changes the binding of a variable to a new value in the environment.  Gives an error if the variable does not exist.
 (define update
   (lambda (var val environment)
+;    (println "update")
+;    (println var)
+;    (println val)
+;    (println environment)
+;    (println (exists? var environment))
     (if (exists? var environment)
         (update-existing var val environment)
         (myerror "error: variable used but not defined:" var))))
@@ -739,19 +775,19 @@
 
 ; updates a statement with functions to evaluate the function values
 (define updateStatementWithFunctions
-  (lambda (statement environment throw next updatedStatement cps-return)
+  (lambda (statement environment currType instance throw next updatedStatement cps-return)
     (cond
       ((null?  statement)            (cps-return statement))
       ((atom? statement)             (cps-return statement))
       ; if the statement includes a sublist, recurse
-      ((list? (car statement))            (updateStatementWithFunctions (car statement) environment throw next updatedStatement (lambda (s)
-                                                                                                                                           (updateStatementWithFunctions (cdr statement) environment throw next updatedStatement (lambda (s2)
+      ((list? (car statement))            (updateStatementWithFunctions (car statement) environment currType instance throw next updatedStatement (lambda (s)
+                                                                                                                                           (updateStatementWithFunctions (cdr statement) environment currType instance throw next updatedStatement (lambda (s2)
                                                                                                                                                                                                                                (cps-return (cons s s2)))))))
       ; if there is a function call, evaluate the function
-      ((eq? (car statement) 'funcall)  (cps-return (interpret-function-call (cdr statement) environment throw  next #t)))
+      ((eq? (car statement) 'funcall)  (cps-return (interpret-function-call (cdr statement) environment currType instance throw  next #t)))
       ; otherwise, keep searching through statements 
       (else (updateStatementWithFunctions (cdr statement) 
-                                          environment throw next updatedStatement (lambda (s) (cps-return (cons (car statement) s))))))))
+                                          environment currType instance throw next updatedStatement (lambda (s) (cps-return (cons (car statement) s))))))))
 
 
 ; finds and returns the global environment from an environment
@@ -777,8 +813,10 @@
 ; looks up a variable without a .
 (define lookup-var-env
   (lambda (var environment currType instance)
-   (println "lookup in env")
-    (println instance)
+ ;  (println "lookup in env")
+    ;(println instance)
+  ;  (println environment)
+  ;  (println instance)
   ;  (println var)
   ;  (println environment)
   ;  (println (exists? var environment))
@@ -817,7 +855,7 @@
 ; helper to lookup a var in a class closure (and upwards to parent classes)
 (define lookup-var-helper
   (lambda (var environment classClosure searchedEnv)
-    (println "in helper")
+ ;   (println "in helper")
   ;  (println var)
   ;  (println classClosure)
   ;  (println environment)
