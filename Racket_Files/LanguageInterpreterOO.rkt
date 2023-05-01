@@ -185,8 +185,7 @@
                              val
                              (next  environment)))))))
 
-       
-                                                                                                           
+                                                                        
 (define get-instance
   (lambda (instanceName environment currType instance)
   ;  (println "get instance")
@@ -198,7 +197,10 @@
                                     (instantiate (get-closure-super (lookup-class-closure (get-instance-name instance) environment currType instance)) environment)
                                   );((lookup-class-closure (get-instance-name instance) environment currType instance))
       ((list? instanceName)       (instantiate (cadr instanceName) environment))
-      (else                       (lookup instanceName environment)))))
+      ; otherwise, want to look up the var in the local env THEN non-static fields
+      ((exists? instanceName environment) (lookup instanceName environment))
+      ; otherwise, doesn't exist (TODO: might not need this because we check exists above?)
+      (else                               (myerror "Instance does not exist: " instanceName)))))
 
     
     ; get the instance the method is being called from
@@ -298,7 +300,7 @@
 ; Adds a new variable binding to the environment.  There may be an assignment with the variable
 (define interpret-declare
   (lambda (statement environment currType instance next)
-;    (println "declaring")
+   ; (println "declaring")
 ;    (println statement)
 ;    (println (eval-expression (get-declare-value statement) environment currType instance))
     (if (exists-declare-value? statement)
@@ -309,8 +311,12 @@
 ; Updates the environment to add a new binding for a variable
 (define interpret-assign
   (lambda (statement environment currType instance throw next)
+    (println "assigning")
     (if (list? (get-assign-lhs statement))
-        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance) (cons (get-instance-fieldsList (dot (cadr (get-assign-lhs statement)) environment currType instance) ) '()))))
+        (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (caddr (get-assign-lhs statement)) (eval-expression s environment currType instance)
+                                                                                                                ; ahouls be searching for the instnce to update in 
+                                                                                                                (cons (get-instance-fieldsList (get-instance (cadr (get-assign-lhs statement)) environment currType instance) ) '())
+                                                                                                                )))
         (updateStatementWithFunctions (get-assign-rhs statement) environment throw next '() (lambda (s) (update (get-assign-lhs statement) (eval-expression s environment currType instance) environment)))
         )
     (next environment) ));(update (get-assign-lhs statement) (eval-expression (get-assign-rhs statement) environment) environment))))
@@ -413,6 +419,7 @@
 (define eval-expression
   (lambda (expr environment currType instance)
     (cond
+      ((eq? expr 'novalue) 'novalue)
       ((number? expr) expr)
       ((eq? expr 'true) #t)
       ((eq? expr 'false) #f)
@@ -433,7 +440,8 @@
   (lambda (expr environment currType instance)
     (cond
       ((eq? 'new (operator expr)) (instantiate (operand1 expr) environment))
-      ((eq? 'dot (operator expr)) (lookup-var-dot (operand2 expr) environment currType  (dot (operand1 expr) environment currType instance))) ; (t)
+     ; ((eq? 'dot (operator expr)) (lookup-var-dot (operand2 expr) environment currType  (dot (operand1 expr) environment currType instance))) ; (t)
+      ((eq? 'dot (operator expr))  (lookup-var-dot (operand2 expr) environment currType (get-instance (operand1 expr) environment currType instance)))
       ((eq? '! (operator expr))   (not (eval-expression (operand1 expr) environment currType instance)))
       ((and (eq? '- (operator expr)) (= 2 (length expr))) (- (eval-expression (operand1 expr) environment currType instance)))
       (else (eval-binary-op2 expr (eval-expression (operand1 expr) environment currType instance) environment currType instance)))))
@@ -769,7 +777,8 @@
 ; looks up a variable without a .
 (define lookup-var-env
   (lambda (var environment currType instance)
-  ;  (println "lookup in env")
+   (println "lookup in env")
+    (println instance)
   ;  (println var)
   ;  (println environment)
   ;  (println (exists? var environment))
@@ -778,8 +787,8 @@
     (cond
       ; check the environment first (function params, etc)
       ((exists? var environment)       (lookup var environment))
-  ; then check the current instance
-  ; ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
+      ; then check the current instance
+      ((exists-in-list? var (topframe (get-instance-fieldsList instance)))  (lookup-in-frame var (get-instance-fieldsList instance)))
       ; check the currentType first
       (else                        (lookup-var-helper var environment (get-class-closure currType (globalEnvironment environment)) #t))
       )))
